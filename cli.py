@@ -4294,7 +4294,10 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
             if width < 52:
                 agent_frame = snapshot.get("agent_alive_frame", "")
                 prefix = agent_frame if agent_frame else "⚕"
-                text = f"{prefix} {snapshot['model_short']} · {duration_label}"
+                text = f"{prefix} {snapshot['model_short']}"
+                if provider_short:
+                    text += f" · {provider_short}"
+                text += f" · {duration_label}"
                 if yolo_active:
                     text += " · ⚠ YOLO"
                 return self._trim_status_bar_text(text, width)
@@ -4482,9 +4485,12 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
                 frags = [
                     ("class:status-bar", f" {prefix} "),
                     ("class:status-bar-strong", snapshot["model_short"]),
-                    ("class:status-bar-dim", " · "),
-                    ("class:status-bar-dim", duration_label),
                 ]
+                if provider_short:
+                    frags.append(("class:status-bar-dim", " · "))
+                    frags.append(("class:status-bar-strong", provider_short))
+                frags.append(("class:status-bar-dim", " · "))
+                frags.append(("class:status-bar-dim", duration_label))
                 if yolo_active:
                     frags.append(("class:status-bar-dim", " · "))
                     frags.append(("class:status-bar-yolo", "⚠ YOLO"))
