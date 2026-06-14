@@ -6,7 +6,6 @@
 use anyhow::{Context, Result};
 use hermes_tui_rust::app::App;
 use log::{error, info};
-use std::fs::File;
 
 fn main() -> Result<()> {
     // Initialize logging to a file ONLY. Completely avoid terminal corruption.
