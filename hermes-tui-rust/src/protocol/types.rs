@@ -367,10 +367,10 @@ pub struct GatewayStderr {
 // Main Gateway Message Enum
 // ============================================================================
 
-/// All possible messages from the gateway
+/// All possible messages from the gateway (event payloads)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data")]
-pub enum GatewayMessage {
+#[serde(tag = "type", content = "payload")]
+pub enum GatewayMessageData {
     // Gateway lifecycle
     #[serde(rename = "gateway.ready")]
     Ready(GatewayReadyResponse),
@@ -431,6 +431,17 @@ pub enum GatewayMessage {
     #[serde(rename = "error")]
     Error(GatewayError),
 }
+
+/// A wrapper for events from the gateway
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayEvent {
+    pub session_id: Option<String>,
+    #[serde(flatten)]
+    pub data: GatewayMessageData,
+}
+
+/// Compatibility alias to avoid breaking too much code at once
+pub type GatewayMessage = GatewayMessageData;
 
 /// Session activate response
 #[derive(Debug, Clone, Serialize, Deserialize)]

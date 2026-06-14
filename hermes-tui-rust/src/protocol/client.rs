@@ -4,11 +4,12 @@
 //! with the Hermes gateway via JSON-RPC over stdio.
 
 use crate::protocol::transport::StdioTransport;
-use crate::protocol::types::{GatewayMessage, TuiRequest};
+use crate::protocol::types::{GatewayEvent, GatewayMessage, JsonRpcMessage, TuiRequest};
 use anyhow::{Context, Result};
+use log::{debug, error, trace, warn};
+use std::fmt;
 use std::io::{Read, Write};
 use std::sync::mpsc::Receiver;
-use std::fmt;
 
 /// Client for sending requests to the gateway
 pub struct GatewayClient {
@@ -69,8 +70,40 @@ impl GatewayClient {
         // Spawn a parsing thread that converts JSON strings to GatewayMessages
         std::thread::spawn(move || {
             for line in line_receiver {
-                if let Ok(message) = serde_json::from_str::<GatewayMessage>(&line) {
-                    let _ = response_sender.send(message);
+                trace!("GatewayClient: Parsing line: {}", line);
+                
+                match serde_json::from_str::<JsonRpcMessage>(&line) {
+                    Ok(rpc) => {
+                        // Handle standard JSON-RPC event notification
+                        if let Some(method) = &rpc.method {
+                            if method == "event" {
+                                if let Some(ref params) = rpc.params {
+                                    match serde_json::from_value::<GatewayEvent>(params.clone()) {
+                                        Ok(event) => {
+                                            let _ = response_sender.send(event.data);
+                                        }
+                                        Err(e) => {
+                                            error!("GatewayClient: Failed to parse event params: {} - Params: {:?}", e, params);
+                                        }
+                                    }
+                                }
+                            } else {
+                                warn!("GatewayClient: Received unknown method: {}", method);
+                            }
+                        } 
+                        // Handle responses to requests (result or error)
+                        else if rpc.id.is_some() {
+                            if let Some(result) = rpc.result {
+                                debug!("GatewayClient: Received response for ID {}: {:?}", rpc.id.unwrap(), result);
+                            } else if let Some(err) = rpc.error {
+                                error!("GatewayClient: Received error for ID {}: {}", rpc.id.unwrap(), err.message);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // Some lines might not be JSON (e.g. system logs)
+                        trace!("GatewayClient: Line is not JSON-RPC: {} - Line: {}", e, line);
+                    }
                 }
             }
         });
@@ -84,14 +117,26 @@ impl GatewayClient {
 
     /// Send a request to the gateway
     ///
-    /// Serializes the request and writes it directly through the transport.
+    /// Serializes the request and wraps it in a JSON-RPC 2.0 envelope.
     pub fn send_request(&mut self, request: TuiRequest) -> Result<()> {
+        let mut val = serde_json::to_value(request)
+            .context("GatewayClient: Failed to serialize request")?;
+        
+        // Add JSON-RPC 2.0 metadata
+        if let Some(obj) = val.as_object_mut() {
+            obj.insert("jsonrpc".to_string(), serde_json::Value::String("2.0".to_string()));
+            // Use a simple incrementing ID if we wanted to track responses, 
+            // but for now 1 is enough for the gateway to accept it as a request.
+            obj.insert("id".to_string(), serde_json::Value::Number(1.into()));
+        }
+
         let transport = self
             .transport
             .as_mut()
             .context("GatewayClient: Not connected")?;
+        
         transport
-            .write_message(&request)
+            .write_line(&serde_json::to_string(&val)?)
             .context("GatewayClient: Failed to send request")?;
         Ok(())
     }
