@@ -6,12 +6,25 @@
 use anyhow::{Context, Result};
 use hermes_tui_rust::app::App;
 use log::{error, info};
+use std::fs::File;
 
 fn main() -> Result<()> {
-    // Initialize logging
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // Initialize logging to a file ONLY. Completely avoid terminal corruption.
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("hermes-tui.log")
+        .context("Failed to open log file")?;
+    
+    // Simple custom logger that writes to the file
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .target(env_logger::Target::Pipe(Box::new(log_file)))
+        .init();
 
-    info!("Hermes TUI Rust starting up...");
+    // Ensure nothing goes to stderr/stdout that could break Ratatui
+    // (except what Ratatui itself handles)
+    
+    info!("--- Kraken Agent TUI Session Start ---");
 
     // Create the app
     let mut app = App::new().context("Failed to initialize application")?;

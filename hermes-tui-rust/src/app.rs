@@ -44,6 +44,8 @@ pub struct App {
     message_history: MessageHistory,
     /// Client for communicating with the Hermes gateway
     gateway_client: GatewayClient,
+    /// Whether the gateway is currently thinking/responding
+    thinking: bool,
     /// Whether the application is currently running
     running: bool,
     /// Current input mode (Normal, Insert, Command)
@@ -52,6 +54,8 @@ pub struct App {
     current_input: String,
     /// Toolbar for displaying status information
     toolbar: Toolbar,
+    /// Banner for branding logo
+    banner: crate::ui::banner::Banner,
     /// Card manager for tool call result cards
     card_manager: CardManager,
     /// Subagent list for tracking spawned subagents
@@ -97,34 +101,42 @@ impl App {
             .context("Failed to enter alternate screen mode")?;
 
         // Set terminal title
-        execute!(io::stdout(), SetTitle("Hermes TUI (Rust)"))
+        execute!(io::stdout(), SetTitle("Kraken Agent (Rust)"))
             .context("Failed to set terminal title")?;
 
         // Initialize terminal with Crossterm backend
         let backend = CrosstermBackend::new(io::stdout());
         let terminal = Terminal::new(backend)
             .context("Failed to create terminal")?;
-        let config = TuiConfig::default();
+        // Initialize config with Kraken theme by default
+        let mut config = TuiConfig::default();
+        config.theme = crate::state::config::BuiltinTheme::Kraken.to_config();
+        
         let theme_colors_rgb = config.theme.colors.to_rgb_colors();
         let chat_colors_rgb = config.theme.chat.to_rgb_colors();
         
+        let mut input_composer = InputComposer::new(chat_colors_rgb);
+        input_composer.set_input_mode(InputMode::Insert);
+
         Ok(Self {
             terminal,
             config,
             session_manager: SessionManager::new(),
             message_history: MessageHistory::new(),
             gateway_client: GatewayClient::new(),
+            thinking: false,
             card_manager: CardManager::new(chat_colors_rgb),
             subagent_list: SubagentList::new(),
             hashline_viewer: HashlineViewer::new(),
             gateway_process: None,
             running: true,
-            input_mode: InputMode::default(),
+            input_mode: InputMode::Insert,
             current_input: String::new(),
             cursor_position: 0,
             chat_component: ChatComponent::new(chat_colors_rgb, true),
-            input_composer: InputComposer::new(chat_colors_rgb),
+            input_composer,
             toolbar: Toolbar::new(theme_colors_rgb, chat_colors_rgb),
+            banner: crate::ui::banner::Banner::default(),
             prompt_manager: PromptManager::new(chat_colors_rgb),
             pending_approval_id: None,
             completion_popup: CompletionPopup::new(chat_colors_rgb),
@@ -335,27 +347,57 @@ impl App {
 
     /// Connect to the gateway by spawning the Python child process
     pub fn connect_gateway(&mut self) -> Result<()> {
-        let python_cmd = std::env::var("HERMES_PYTHON")
-            .unwrap_or_else(|_| "python3".into());
-        
+        let current_dir = std::env::current_dir()?;
+        let project_root = if current_dir.join("tui_gateway").exists() {
+            current_dir
+        } else if current_dir.parent().map(|p| p.join("tui_gateway").exists()).unwrap_or(false) {
+            current_dir.parent().unwrap().to_path_buf()
+        } else {
+            current_dir
+        };
+
+        // Try to find the virtual environment python
+        let venv_python = project_root.join("venv").join("bin").join("python3");
+        let python_cmd = if venv_python.exists() {
+            venv_python.to_string_lossy().to_string()
+        } else {
+            std::env::var("HERMES_PYTHON").unwrap_or_else(|_| "python3".into())
+        };
+
+        // Open log file for gateway stderr redirection
+        let stderr_file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("hermes-tui.log")
+            .unwrap();
+
+        let current_pythonpath = std::env::var("PYTHONPATH").unwrap_or_default();
+        let project_root_str = project_root.to_string_lossy();
+        let new_pythonpath = if current_pythonpath.is_empty() {
+            project_root_str.to_string()
+        } else {
+            format!("{}:{}", project_root_str, current_pythonpath)
+        };
+
         let mut child = std::process::Command::new(&python_cmd)
             .args(["-m", "tui_gateway.entry"])
+            .env("PYTHONPATH", new_pythonpath) // Ensure tui_gateway and hermes packages can be found
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::from(stderr_file)) // Redirect to log file
             .spawn()
-            .context(format!("Failed to spawn gateway process using '{}'. Set HERMES_PYTHON env var or ensure python3 is in PATH.", python_cmd))?;
-        
+            .context(format!("Failed to spawn gateway process using '{}'.", python_cmd))?;
+
         let child_stdin = child.stdin.take()
             .context("Failed to take child stdin")?;
         let child_stdout = child.stdout.take()
             .context("Failed to take child stdout")?;
-        
+
         info!("Gateway process spawned: {} (PID: {})", python_cmd, child.id());
-        
+
         self.gateway_client.connect(child_stdout, child_stdin)?;
         self.gateway_process = Some(child);
-        
+
         Ok(())
     }
     /// Send a request to the gateway
@@ -414,10 +456,13 @@ impl App {
             if let Some(message) = self.receive_gateway_message() {
                 self.handle_gateway_message(message)?;
             }
-            
+
+            // Update toolbar animation
+            self.toolbar.tick(self.thinking);
+
             // Draw UI if no event was processed
             self.draw()?;
-        }
+            }
         
         info!("Event loop ended");
         Ok(())
@@ -436,7 +481,7 @@ impl App {
         if self.prompt_manager.has_active_prompt() {
             if self.prompt_manager.is_approval_active() {
                 match key.code {
-                    KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    KeyCode::Char('y' | 'Y') => {
                         self.prompt_manager.approve();
                         if let Some(req_id) = self.pending_approval_id.take() {
                             let response = TuiRequest::ApprovalRespond(ApprovalResponse {
@@ -449,7 +494,7 @@ impl App {
                         self.input_composer_mut().set_active(true);
                         self.set_input_mode(InputMode::Insert);
                     }
-                    KeyCode::Char('n') | KeyCode::Char('N') => {
+                    KeyCode::Char('n' | 'N') => {
                         self.prompt_manager.deny();
                         if let Some(req_id) = self.pending_approval_id.take() {
                             let response = TuiRequest::ApprovalRespond(ApprovalResponse {
@@ -668,15 +713,20 @@ impl App {
         
         // Send the prompt to the gateway
         let message_content = input.clone();
+        let session_id = self.sessions().current_session().map(|s| s.id.clone()).unwrap_or_default();
+        
         let request = PromptSubmitRequest {
-            message: input,
+            session_id,
+            text: input,
             images: None,
+            truncate_before_user_ordinal: None,
         };
         
         let tui_request = TuiRequest::PromptSubmit(request);
         
         info!("Submitting prompt");
-        
+
+        self.thinking = true;
         self.send_gateway_request(tui_request)?;
         
         // Add user message to chat immediately (optimistic update)
@@ -695,9 +745,11 @@ impl App {
         info!("Executing slash command: {}", command);
         
         let command_clone = command.clone();
+        let session_id = self.sessions().current_session().map(|s| s.id.clone()).unwrap_or_default();
         
         // Send slash.exec request to gateway
         let request = SlashExecRequest {
+            session_id,
             command,
         };
         
@@ -811,22 +863,29 @@ impl App {
 
     /// Handle a mouse event
     fn handle_mouse_event(&mut self, mouse: MouseEvent) -> Result<()> {
-        debug!("Mouse event: {:?}", mouse);
-        // TODO: Handle mouse events
+        use crossterm::event::MouseEventKind;
+        self.mouse_context.update(&mouse);
+
+        // Route to chat component for scroll
+        if mouse.kind == MouseEventKind::ScrollUp {
+            self.chat_component.scroll_up(3);
+        } else if mouse.kind == MouseEventKind::ScrollDown {
+            self.chat_component.scroll_down(3);
+        }
         Ok(())
     }
 
     /// Handle a terminal resize event
     fn handle_resize(&mut self, width: u16, height: u16) -> Result<()> {
-        debug!("Terminal resized to {}x{}", width, height);
-        // TODO: Update layout based on new size
+        execute!(io::stdout(), crossterm::terminal::SetSize(width, height))?;
+        let _ = self.send_gateway_request(TuiRequest::TerminalResize { cols: width, rows: height });
         Ok(())
     }
 
     /// Handle a paste event
     fn handle_paste(&mut self, text: &str) -> Result<()> {
-        debug!("Pasted text: {}", text);
-        // TODO: Insert text into active input field
+        self.input_composer.insert_text(text);
+        self.current_input = self.input_composer.get_input().to_string();
         Ok(())
     }
 
@@ -926,11 +985,25 @@ impl App {
             ready.models.as_ref().map_or(0, |v| v.len())
         );
         
-        // Log any existing sessions
-        if let Some(sessions) = ready.sessions {
-            for session in sessions {
-                debug!("Available session: {} ({} messages)", session.title, session.message_count);
+        // Populate sessions in manager
+        if let Some(sessions) = &ready.sessions {
+            self.sessions_mut().set_sessions(sessions.clone());
+        }
+
+        // Auto-resume latest session or create a new one if none exist
+        if let Some(sessions) = &ready.sessions {
+            if let Some(latest) = sessions.first() {
+                info!("Auto-resuming latest session: {}", latest.id);
+                let request = SessionResumeRequest {
+                    session_id: latest.id.clone(),
+                };
+                let tui_request = TuiRequest::SessionResume(request);
+                let _ = self.send_gateway_request(tui_request);
+            } else {
+                self.create_new_session()?;
             }
+        } else {
+            self.create_new_session()?;
         }
         
         Ok(())
@@ -1005,7 +1078,8 @@ impl App {
     /// Handle session list response
     fn handle_session_list(&mut self, response: SessionListResponse) -> Result<()> {
         if let Some(sessions) = response.sessions {
-            self.sessions_mut().set_sessions(sessions);
+            self.sessions_mut().set_sessions(sessions.clone());
+            self.session_picker.show(sessions);
         }
         Ok(())
     }
@@ -1084,8 +1158,10 @@ impl App {
     
     /// Handle message complete
     fn handle_message_complete(&mut self, complete: MessageComplete) -> Result<()> {
-        debug!("Message complete: role={:?}, content length={}", 
+        debug!("Message complete: role={:?}, content length={}",
             complete.role, complete.content.len());
+
+        self.thinking = false;
         
         let message = Message::new(complete.role, complete.content);
         
@@ -1100,7 +1176,9 @@ impl App {
     
     /// Handle tool start
     fn handle_tool_start(&mut self, tool_start: ToolStart) -> Result<()> {
-        debug!("Tool started: {}({})", tool_start.tool_name, tool_start.call_id);
+        debug!("Tool started: {} ({})", tool_start.tool_name, tool_start.call_id);
+
+        self.thinking = true;
 
         // Create a tool card for this tool call
         let data = ToolCardData::running(&tool_start.tool_name)
@@ -1139,6 +1217,8 @@ impl App {
     /// Handle tool complete
     fn handle_tool_complete(&mut self, tool_complete: ToolComplete) -> Result<()> {
         debug!("Tool completed: {} ({}ms)", tool_complete.call_id, tool_complete.duration_ms.unwrap_or(0));
+        
+        self.thinking = false;
         
         // Update card manager with result
         if let Some(ref error) = tool_complete.error {
@@ -1192,22 +1272,18 @@ impl App {
     /// Handle slash completion
     fn handle_slash_completion(&mut self, completion: CompletionResponse) -> Result<()> {
         debug!("Slash completion: {:?}", completion.items);
-        
-        // TODO: Show completions in input composer
-        // For now, just log
         if let Some(items) = completion.items {
-            for item in items {
-                debug!("  - {}", item.display);
-            }
+            self.completion_popup.show(items);
         }
-        
         Ok(())
     }
     
     /// Handle path completion
     fn handle_path_completion(&mut self, completion: CompletionResponse) -> Result<()> {
         debug!("Path completion: {:?}", completion.items);
-        // TODO: Show completions in input composer
+        if let Some(items) = completion.items {
+            self.completion_popup.show(items);
+        }
         Ok(())
     }
     
@@ -1215,10 +1291,19 @@ impl App {
     fn handle_slash_exec(&mut self, response: SlashExecResponse) -> Result<()> {
         if let Some(output) = response.output {
             info!("Slash command output: {}", output);
-            // TODO: Show output in chat
+            
+            let message = Message::system(output);
+            self.messages_mut().add_message(message.clone());
+            self.chat_component_mut().add_message(message);
+            self.chat_component_mut().scroll_to_bottom();
         }
         if let Some(warning) = response.warning {
             log::warn!("Slash command warning: {}", warning);
+            
+            let message = Message::system(format!("Warning: {}", warning));
+            self.messages_mut().add_message(message.clone());
+            self.chat_component_mut().add_message(message);
+            self.chat_component_mut().scroll_to_bottom();
         }
         Ok(())
     }
@@ -1245,10 +1330,10 @@ impl App {
     /// Handle gateway error
     fn handle_gateway_error(&mut self, error: GatewayError) -> Result<()> {
         log::error!("Gateway error: {}", error.message);
+        self.thinking = false; // Reset thinking on error
         if let Some(details) = error.details {
             log::error!("Details: {}", details);
         }
-        // TODO: Show error in UI
         Ok(())
     }
     
@@ -1272,19 +1357,19 @@ impl App {
             let size = frame.area();
 
             // Skip rendering if dimensions are too small
-            if size.width < 10 || size.height < 5 {
+            if size.width < 20 || size.height < 10 {
                 return;
             }
 
             // Determine layout: with or without subagent sidebar
             let has_subagents = !self.subagent_list.is_empty();
 
-            let (main_area, sidebar_area) = if has_subagents && size.width >= 80 {
+            let (main_area, sidebar_area) = if has_subagents && size.width >= 100 {
                 let horiz = Layout::default()
                     .direction(Direction::Horizontal)
                     .constraints([
-                        Constraint::Percentage(70),
-                        Constraint::Percentage(30),
+                        Constraint::Min(1),
+                        Constraint::Length(30),
                     ])
                     .split(size);
                 (horiz[0], horiz[1])
@@ -1302,14 +1387,26 @@ impl App {
                 });
             let has_hashline = hashline_block.is_some();
             
-            // Build constraints dynamically — insert activity area if needed
-            let mut constraints: Vec<Constraint> = Vec::new();
-            constraints.push(Constraint::Min(1)); // chat area
-            if has_cards || has_hashline {
-                constraints.push(Constraint::Length(8)); // cards/hashline pane
-            }
-            constraints.push(Constraint::Length(3)); // input
-            constraints.push(Constraint::Length(1)); // toolbar
+            // Build constraints dynamically
+            let activity_height = if has_cards {
+                (self.card_manager.len() as u16 * 4).min(12).max(4)
+            } else if has_hashline {
+                8
+            } else {
+                0
+            };
+
+            // Banner height: 7 for full logo + spacing, 1 for mini
+            let banner_height = if size.height > 40 { 7 } else { 1 };
+            let footer_height = if self.input_composer.get_input().is_empty() { 3 } else { 1 };
+
+            let constraints = [
+                Constraint::Length(banner_height), // Top Banner
+                Constraint::Min(1),                // Main chat/landing area (Boxed)
+                Constraint::Length(activity_height), // activity pane (if any)
+                Constraint::Length(footer_height),   // footer area (Unboxed)
+                Constraint::Length(1),             // toolbar
+            ];
             
             let main_layout = Layout::default()
                 .direction(Direction::Vertical)
@@ -1317,40 +1414,54 @@ impl App {
                 .constraints(constraints)
                 .split(main_area);
             
-            let mut layout_idx = 0;
+            // 0. Render banner
+            if banner_height > 1 {
+                self.banner.render(frame, main_layout[0]);
+            } else {
+                self.banner.render_mini(frame, main_layout[0]);
+            }
             
-            // Render chat component
-            let chat_area = main_layout[layout_idx];
+            // 1. Render chat component (Main Area - Boxed)
+            let chat_area = main_layout[1];
+            self.chat_component.set_visible_height(chat_area.height.saturating_sub(2)); // Subtract 2 for borders
             self.chat_component.render(frame, chat_area);
-            layout_idx += 1;
             
-            // Render activity area (cards or hashline) if present
-            if has_cards || has_hashline {
-                let activity_area = main_layout[layout_idx];
-                
+            // 2. Render activity area (cards or hashline) if present
+            if activity_height > 0 {
+                let activity_area = main_layout[2];
                 if has_cards {
                     self.card_manager.render_stack(frame, activity_area);
                 } else if let Some(block) = hashline_block {
                     self.hashline_viewer.render(&block, activity_area, frame);
                 }
-                
-                layout_idx += 1;
             }
             
-            // Render input composer
-            let input_area = main_layout[layout_idx];
-            self.input_composer.render(frame, input_area);
-            layout_idx += 1;
+            // 3. Render clean footer (Unboxed)
+            self.input_composer.render_clean(frame, main_layout[3]);
             
-            // Render toolbar
-            let toolbar_area = main_layout[layout_idx];
-            self.toolbar.render(frame, toolbar_area);
+            // 4. Render toolbar
+            self.toolbar.render(frame, main_layout[4]);
 
             // Render subagent sidebar if there are active subagents
             if has_subagents && sidebar_area.width > 0 {
-                let sidebar_height = sidebar_area.height;
-                self.subagent_list.set_visible_height(sidebar_height.saturating_sub(2));
+                self.subagent_list.set_visible_height(sidebar_area.height.saturating_sub(2));
                 self.subagent_list.render(sidebar_area, frame);
+            }
+
+            // --- Overlays ---
+            if self.session_picker.is_visible() {
+                self.session_picker.render(frame, size);
+            } else if self.prompt_manager.has_active_prompt() {
+                self.prompt_manager.render(frame, size);
+            } else if self.completion_popup.is_visible() {
+                let footer_area = main_layout[3];
+                let popup_area = Rect {
+                    x: footer_area.x + 5,
+                    y: footer_area.y.saturating_sub(10),
+                    width: 40.min(footer_area.width),
+                    height: 10.min(footer_area.y),
+                };
+                self.completion_popup.render(frame, popup_area);
             }
         })?;
 
@@ -1363,35 +1474,24 @@ impl App {
 
     /// Clean up terminal state on exit.
     ///
-    /// 1. Kill the gateway child process first (closes pipes,
-    ///    allowing the StdioTransport reader thread to exit cleanly).
+    /// 1. Kill the gateway child process first.
     /// 2. Disconnect the gateway client.
     /// 3. Restore terminal to normal mode.
     pub fn cleanup(&mut self) -> Result<()> {
-        // Kill gateway process first — closes child stdout so the reader
-        // thread in StdioTransport can exit cleanly
+        // Leave alternate screen immediately to restore terminal state
+        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        let _ = disable_raw_mode();
+        let _ = io::stdout().flush();
+
+        // Kill gateway process - don't block too long
         if let Some(mut child) = self.gateway_process.take() {
             let _ = child.kill();
-            let _ = child.wait();
         }
         
-        // Disconnect gateway client (drops StdioTransport, joins reader thread)
+        // Disconnect gateway client
         if self.gateway_client.is_connected() {
             let _ = self.gateway_client.disconnect();
         }
-        
-        // Leave alternate screen
-        execute!(io::stdout(), LeaveAlternateScreen)
-            .context("Failed to leave alternate screen")?;
-        
-        // Disable raw mode
-        disable_raw_mode()
-            .context("Failed to disable raw mode")?;
-        
-        // Flush stdout to ensure all output is displayed
-        io::stdout()
-            .flush()
-            .context("Failed to flush stdout")?;
         
         Ok(())
     }
@@ -1420,6 +1520,7 @@ mod tests {
             session_manager: SessionManager::new(),
             message_history: MessageHistory::new(),
             gateway_client: GatewayClient::new(),
+            thinking: false,
             gateway_process: None,
             running: true,
             input_mode: InputMode::Normal,
@@ -1428,9 +1529,15 @@ mod tests {
             chat_component: ChatComponent::new(chat_colors_rgb, true),
             input_composer: InputComposer::new(chat_colors_rgb),
             toolbar: Toolbar::new(theme_colors_rgb, chat_colors_rgb),
+            banner: crate::ui::banner::Banner::default(),
             card_manager: CardManager::new(chat_colors_rgb),
             subagent_list: SubagentList::new(),
             hashline_viewer: HashlineViewer::new(),
+            prompt_manager: PromptManager::new(chat_colors_rgb),
+            pending_approval_id: None,
+            completion_popup: CompletionPopup::new(chat_colors_rgb),
+            session_picker: SessionPicker::new(chat_colors_rgb),
+            mouse_context: MouseContext::new(),
         };
     }
     
@@ -1449,6 +1556,7 @@ mod tests {
             session_manager: SessionManager::new(),
             message_history: MessageHistory::new(),
             gateway_client: GatewayClient::new(),
+            thinking: false,
             gateway_process: None,
             running: true,
             input_mode: InputMode::Normal,
@@ -1457,9 +1565,15 @@ mod tests {
             chat_component: ChatComponent::new(chat_colors_rgb, true),
             input_composer: InputComposer::new(chat_colors_rgb),
             toolbar: Toolbar::new(theme_colors_rgb, chat_colors_rgb),
+            banner: crate::ui::banner::Banner::default(),
             card_manager: CardManager::new(chat_colors_rgb),
             subagent_list: SubagentList::new(),
             hashline_viewer: HashlineViewer::new(),
+            prompt_manager: PromptManager::new(chat_colors_rgb),
+            pending_approval_id: None,
+            completion_popup: CompletionPopup::new(chat_colors_rgb),
+            session_picker: SessionPicker::new(chat_colors_rgb),
+            mouse_context: MouseContext::new(),
         };
         
         assert!(app.is_running());
