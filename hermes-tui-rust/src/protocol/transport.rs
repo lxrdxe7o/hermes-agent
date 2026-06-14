@@ -103,14 +103,12 @@ impl<W: Write + Send + 'static> StdioTransport<W> {
 
     /// Stop the reader thread and clean up resources
     pub fn stop(&mut self) {
-        // Note: The receiver is owned by the caller, not by the transport.
-        // When the caller drops the receiver, the thread will exit automatically.
-        
-        // Wait for the reader thread to finish
-        if let Some(handle) = self.reader_handle.take() {
-            // Give the thread a moment to exit cleanly
-            let _ = handle.join();
-        }
+        // We take the handle but DON'T join it here. Joining a thread
+        // that's blocked on reading from a pipe (which might be closed or
+        // not) can lead to deadlocks during cleanup.
+        // The thread will exit on its own when the pipe is closed or
+        // the sender/receiver are dropped.
+        let _ = self.reader_handle.take();
     }
 }
 

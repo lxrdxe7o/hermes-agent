@@ -285,6 +285,7 @@ pub struct CompletionResponse {
 /// Slash exec request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlashExecRequest {
+    pub session_id: String,
     pub command: String,
 }
 
@@ -325,9 +326,12 @@ pub struct ConfigGetResponse {
 /// Prompt submit request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptSubmitRequest {
-    pub message: String,
+    pub session_id: String,
+    pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub images: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncate_before_user_ordinal: Option<usize>,
 }
 
 /// Prompt submit response
@@ -335,6 +339,8 @@ pub struct PromptSubmitRequest {
 pub struct PromptSubmitResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ok: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
 }
 
 // ============================================================================
