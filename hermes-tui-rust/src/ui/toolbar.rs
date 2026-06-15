@@ -5,9 +5,9 @@
 
 use ratatui::{
     layout::Rect,
-    style::{Color, Style, Stylize},
+    style::{Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
@@ -141,8 +141,8 @@ impl Toolbar {
         self.is_thinking = is_thinking;
         if is_thinking {
             self.spinner_idx = self.spinner_idx.wrapping_add(1);
-            // Change verb every 20 ticks
-            if self.spinner_idx % 20 == 0 {
+            // Change verb every 200 ticks (~3.3s at 60fps)
+            if self.spinner_idx % 200 == 0 {
                 self.verb_idx = self.verb_idx.wrapping_add(1);
             }
         }
@@ -151,54 +151,45 @@ impl Toolbar {
     pub fn update_status(&mut self, connected: bool, model: Option<&str>, session: Option<&str>) {
         self.items.clear();
         if connected {
-            self.add_text("● ".to_string());
+            self.add_text("●");
         } else {
-            self.add_text("○ ".to_string());
+            self.add_text("○");
         }
         if let Some(model_name) = model {
-            self.add_text(format!("Model: {} ", model_name));
+            self.add_text(format!("Model: {}", model_name));
         }
         if let Some(session_name) = session {
-            self.add_text(format!("Session: {} ", session_name));
+            self.add_text(format!("Session: {}", session_name));
         }
         let mode_text = match self.input_mode {
             InputMode::Normal => "Normal",
             InputMode::Insert => "Insert",
             InputMode::Command => "Command",
         };
-        self.add_text(format!("Mode: {} ", mode_text));
+        self.add_text(format!("Mode: {}", mode_text));
     }
 
-    /// Render the toolbar with Powerline-style segments
+    /// Render the toolbar as a clean status line matching the TUI aesthetic
     pub fn render(&self, frame: &mut Frame, area: Rect) {
         if area.height == 0 {
             return;
         }
 
-        let bg_main = Color::Rgb(27, 29, 30);   // #1B1D1E
-        let bg_seg1 = Color::Rgb(117, 113, 94); // #75715E (Dev)
-        let bg_seg2 = Color::Rgb(73, 72, 62);   // #49483E (Status)
-        let fg_text = Color::Rgb(248, 248, 242); // #F8F8F2
+        let dim = self.chat_colors.tool_text;
+        let accent_green = self.theme_colors.success;
+        let accent_red = self.theme_colors.error;
+        let main_fg = self.theme_colors.text;
+        let sep = Style::default().fg(dim);
+        let sep_str = " · ";
 
-        // Background
-        frame.render_widget(Block::default().style(Style::default().bg(bg_main)), area);
+        let mut spans: Vec<Span> = Vec::new();
 
-        let mut left_spans = Vec::new();
+        // 1. Connection indicator
+        let connected = self.items.iter().any(|i| i.text == "●");
+        let dot_color = if connected { accent_green } else { accent_red };
+        spans.push(Span::styled("●", Style::default().fg(dot_color).bold()));
 
-        // 1. Env Segment
-        left_spans.push(Span::styled(" Dev ", Style::default().bg(bg_seg1).fg(bg_main).bold()));
-        left_spans.push(Span::styled("", Style::default().fg(bg_seg1).bg(bg_seg2)));
-
-        // 2. Connection Status
-        let (status_icon, status_color) = if self.items.iter().any(|i| i.text.contains("●")) {
-            (" ● ", Color::Rgb(166, 226, 46))
-        } else {
-            (" ○ ", Color::Rgb(249, 38, 114))
-        };
-        left_spans.push(Span::styled(status_icon, Style::default().bg(bg_seg2).fg(status_color).bold()));
-        left_spans.push(Span::styled("", Style::default().fg(bg_seg2).bg(bg_main)));
-
-        // 3. Thinking Indicator (if active)
+        // 2. Thinking indicator (if active)
         if self.is_thinking {
             let faces = ["(≡)", "(≌)", "(‿)", "(◈)", "(Ψ)", "(🦑)"];
             let verbs = [
@@ -209,46 +200,53 @@ impl Toolbar {
                 "counting jellyfish", "spiraling downward", "mapping the sea floor",
                 "teasing the leviathan", "whispering to barnacles",
             ];
-            let face = faces[self.spinner_idx % faces.len()];
+            let face = faces[(self.spinner_idx / 10) % faces.len()];
             let verb = verbs[self.verb_idx % verbs.len()];
-            
-            left_spans.push(Span::styled(format!(" {} {}... ", face, verb), Style::default().fg(Color::Rgb(166, 226, 46)).bg(bg_main).bold().italic()));
-            left_spans.push(Span::styled("", Style::default().fg(bg_seg2)));
+            spans.push(Span::styled(format!(" {} {}... ", face, verb),
+                Style::default().fg(accent_green).bold().italic()));
         }
 
-        // 4. Model/Session Info
+        // 3. Info items (model, session, mode)
+        let mut first = true;
         for item in &self.items {
             let text = item.text.trim();
-            if text.contains("●") || text.contains("○") || text.is_empty() {
+            if text == "●" || text == "○" || text.is_empty() {
                 continue;
             }
-            left_spans.push(Span::styled(format!(" {} ", text), Style::default().fg(fg_text).bg(bg_main)));
-            left_spans.push(Span::styled(" ", Style::default().fg(bg_seg2)));
+            if !first && !self.is_thinking {
+                spans.push(Span::styled(sep_str, sep));
+            }
+            // Labels like "Model:" in dim, values in main fg
+            if let Some((label, value)) = text.split_once(": ") {
+                spans.push(Span::styled(label, Style::default().fg(dim)));
+                spans.push(Span::styled(":", Style::default().fg(dim)));
+                spans.push(Span::styled(format!("{}", value), Style::default().fg(main_fg)));
+            } else {
+                spans.push(Span::styled(text, Style::default().fg(main_fg)));
+            }
+            first = false;
         }
 
-        // Right Info
+        // 4. Right side: clock
         let clock = chrono::Local::now().format("%H:%M").to_string();
-        let right_text = format!("  100%  {} ", clock);
-        let right_span = Span::styled(right_text, Style::default().fg(bg_seg1).bg(bg_main));
+        let clock_span = Span::styled(format!(" {} ", clock), Style::default().fg(dim));
 
-        let left_line = Line::from(left_spans);
+        let left_line = Line::from(spans);
         let left_width = left_line.width();
-        let right_width = right_span.width();
+        let clock_width = clock_span.width();
 
         let mut final_spans = left_line.spans;
-        if area.width > (left_width + right_width) as u16 {
-            let padding = " ".repeat(area.width as usize - left_width - right_width);
+
+        if area.width > (left_width as u16 + clock_width as u16) {
+            let padding = " ".repeat(area.width as usize - left_width - clock_width);
             final_spans.push(Span::raw(padding));
-            final_spans.push(right_span);
-        } else if area.width > left_width as u16 {
-            // Squeeze padding
-            let padding = " ".repeat(area.width.saturating_sub(left_width as u16) as usize);
-            final_spans.push(Span::raw(padding));
+            final_spans.push(clock_span);
         }
 
-        frame.render_widget(Paragraph::new(Line::from(final_spans)).style(Style::default().bg(bg_main)), area);
+        frame.render_widget(Paragraph::new(Line::from(final_spans)), area);
     }
 }
+
 
 #[cfg(test)]
 mod tests {
