@@ -262,6 +262,16 @@ impl SubagentList {
     pub fn set_visible_height(&mut self, height: u16) {
         self.visible_height = height;
     }
+
+    /// Get immutable access to the agent list
+    pub fn agents(&self) -> &[SubagentInfo] {
+        &self.agents
+    }
+
+    /// Get mutable access to the agent list
+    pub fn agents_mut(&mut self) -> &mut Vec<SubagentInfo> {
+        &mut self.agents
+    }
 }
 
 #[cfg(test)]
