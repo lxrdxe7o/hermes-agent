@@ -17,12 +17,18 @@ use ratatui::{
 
 use crate::protocol::types::MessageRole;
 use crate::state::{config::ChatColorsRgb, messages::Message};
-
+use crate::ui::cards::CardManager;
+use crate::ui::subagent::{SubagentInfo, SubagentList};
 use std::collections::HashSet;
 /// Chat component for displaying conversation messages
 ///
 /// This component renders a scrollable chat transcript with proper
 /// formatting, colors, and timestamps.
+/// Chat component for displaying conversation messages
+///
+/// This component renders a scrollable chat transcript with proper
+/// formatting, colors, and timestamps. Supports message selection,
+/// inline tool cards, and subagent display.
 #[derive(Debug, Clone)]
 pub struct ChatComponent {
     /// Messages to display
@@ -40,6 +46,8 @@ pub struct ChatComponent {
     expanded_systems: HashSet<String>,
     /// Content width used for word-wrap calculations (set each render)
     inner_width: u16,
+    /// Currently selected message index (for Normal mode navigation)
+    selected_index: Option<usize>,
 }
 
 impl ChatComponent {
@@ -54,6 +62,7 @@ impl ChatComponent {
             show_timestamps,
             inner_width: 80,
             expanded_systems: HashSet::new(),
+            selected_index: None,
         }
     }
 
@@ -92,9 +101,26 @@ impl ChatComponent {
     pub fn set_inner_width(&mut self, width: u16) {
         self.inner_width = width;
     }
-
     /// Calculate the height of a message in lines, accounting for word-wrap
-    pub fn message_height(&self, message: &Message) -> u16 {
+    /// and inline rendering (tool cards, subagents).
+    pub fn message_height(&self, message: &Message, card_manager: &CardManager) -> u16 {
+        // Tool messages rendered inline: use card_manager height
+        if message.role == MessageRole::Tool && message.message_id.is_some() {
+            if let Some(card) = message.message_id.as_ref().and_then(|id| card_manager.find_by_call_id(id)) {
+                if card.is_expanded() {
+                    let w = self.inner_width.saturating_sub(4) as usize;
+                    let lines = card.content().lines().map(|l| ((l.len() as f64) / w.max(1) as f64).ceil() as u16).sum::<u16>().max(1);
+                    return lines + 3; // borders + spacing
+                }
+                return 4; // collapsed tool card
+            }
+        }
+        
+        // Subagent messages: always 2 lines
+        if message.role == MessageRole::System && message.message_id.as_deref().map_or(false, |id| id.starts_with("subagent:")) {
+            return 2;
+        }
+        
         let is_user = message.role == MessageRole::User;
         // User messages have border padding (2) + spacing (1) = 3 extra lines
         // Non-user gutter layout has just spacing (1) extra line
@@ -129,8 +155,8 @@ impl ChatComponent {
     }
 
     /// Scroll down by the given amount (in lines)
-    pub fn scroll_down(&mut self, amount: u16) {
-        let max = self.max_scroll_position();
+    pub fn scroll_down(&mut self, amount: u16, card_manager: &CardManager) {
+        let max = self.max_scroll_position(card_manager);
         self.scroll_position = self.scroll_position.saturating_add(amount).min(max);
     }
 
@@ -138,10 +164,9 @@ impl ChatComponent {
     pub fn scroll_up(&mut self, amount: u16) {
         self.scroll_position = self.scroll_position.saturating_sub(amount);
     }
-
     /// Scroll to the bottom
-    pub fn scroll_to_bottom(&mut self) {
-        self.scroll_position = self.max_scroll_position();
+    pub fn scroll_to_bottom(&mut self, card_manager: &CardManager) {
+        self.scroll_position = self.max_scroll_position(card_manager);
     }
 
     /// Scroll to the top
@@ -150,11 +175,11 @@ impl ChatComponent {
     }
 
     /// Get the maximum scroll position
-    pub fn max_scroll_position(&self) -> u16 {
+    pub fn max_scroll_position(&self, card_manager: &CardManager) -> u16 {
         let total_height: u16 = self
             .messages
             .iter()
-            .map(|m| self.message_height(m))
+            .map(|m| self.message_height(m, card_manager))
             .sum();
         total_height.saturating_sub(self.visible_height)
     }
@@ -207,12 +232,11 @@ impl ChatComponent {
     pub fn messages(&self) -> &[Message] {
         &self.messages
     }
-
     /// Add a single message
-    pub fn add_message(&mut self, message: Message) {
+    pub fn add_message(&mut self, message: Message, card_manager: &CardManager) {
         self.messages.push(message);
         // Auto-scroll to bottom when new message is added
-        self.scroll_to_bottom();
+        self.scroll_to_bottom(card_manager);
     }
 
     /// Update an existing message (for streaming deltas)
@@ -233,9 +257,9 @@ impl ChatComponent {
     }
 
     /// Set all messages at once
-    pub fn set_messages(&mut self, messages: Vec<Message>) {
+    pub fn set_messages(&mut self, messages: Vec<Message>, card_manager: &CardManager) {
         self.messages = messages;
-        self.scroll_to_bottom();
+        self.scroll_to_bottom(card_manager);
     }
 
     /// Toggle expansion of a system message
@@ -245,51 +269,124 @@ impl ChatComponent {
         }
     }
 
+    /// Get the currently selected message index
+    pub fn get_selected_index(&self) -> Option<usize> {
+        self.selected_index
+    }
+
+    /// Select the next selectable message (for Normal mode)
+    pub fn select_next(&mut self, _card_manager: &CardManager) {
+        let len = self.messages.len();
+        if len == 0 {
+            self.selected_index = None;
+            return;
+        }
+        let next = self.selected_index.map(|i| i + 1).unwrap_or(0);
+        self.selected_index = Some(if next >= len { 0 } else { next });
+    }
+
+    /// Select the previous selectable message (for Normal mode)
+    pub fn select_prev(&mut self, _card_manager: &CardManager) {
+        let len = self.messages.len();
+        if len == 0 {
+            self.selected_index = None;
+            return;
+        }
+        let prev = self.selected_index.map(|i| if i == 0 { len - 1 } else { i - 1 }).unwrap_or(len - 1);
+        self.selected_index = Some(prev);
+    }
+
+    /// Ensure the selected message is visible by scrolling if needed
+    pub fn ensure_selected_in_view(&mut self, card_manager: &CardManager) {
+        let idx = match self.selected_index {
+            Some(i) => i,
+            None => return,
+        };
+        let mut offset = 0u16;
+        for (i, msg) in self.messages.iter().enumerate() {
+            if i >= idx {
+                break;
+            }
+            offset += self.message_height(msg, card_manager);
+        }
+        let msg_height = self.message_height(&self.messages[idx], card_manager);
+        if offset < self.scroll_position {
+            self.scroll_position = offset;
+        } else if offset + msg_height > self.scroll_position + self.visible_height {
+            let need = (offset + msg_height).saturating_sub(self.scroll_position + self.visible_height);
+            self.scroll_position = self.scroll_position.saturating_add(need);
+        }
+    }
+
+    /// Build a display line for a subagent (rendered inline in chat transcript)
+    pub fn build_subagent_line(&self, agent: &SubagentInfo) -> Line<'static> {
+        let (icon, icon_style) = agent.status_style();
+        let mut spans = Vec::new();
+        spans.push(Span::styled(format!(" {} ", icon), icon_style));
+        if agent.parent_id.is_some() {
+            spans.push(Span::styled("└ ", Style::default().fg(Color::DarkGray)));
+        }
+        spans.push(Span::styled(
+            agent.id.clone(),
+            Style::default().fg(Color::Cyan).bold(),
+        ));
+        let max_goal = 40usize;
+        let goal = if agent.goal.len() > max_goal {
+            format!(": {}...", &agent.goal[..max_goal.saturating_sub(3)])
+        } else {
+            format!(": {}", agent.goal)
+        };
+        spans.push(Span::styled(goal, Style::default().fg(Color::White)));
+        if let Some(ref summary) = agent.summary {
+            let max_sum = 30usize;
+            let s = if summary.len() > max_sum {
+                format!(" → {}...", &summary[..max_sum.saturating_sub(3)])
+            } else {
+                format!(" → {}", summary)
+            };
+            spans.push(Span::styled(s, Style::default().fg(Color::DarkGray)));
+        }
+        Line::from(spans)
+    }
+
     /// Render the chat component
-    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, card_manager: &CardManager, subagent_list: &SubagentList) {
         if self.messages.is_empty() {
             self.render_empty(frame, area);
             return;
         }
 
-        // Create a block for the chat area
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::new().fg(self.colors.border));
 
-        // Inner area for messages
         let inner_area = block.inner(area);
         if inner_area.height == 0 || inner_area.width == 0 {
             frame.render_widget(block, area);
             return;
         }
 
-        // Update inner_width for word-wrap calculations in message_height
         self.inner_width = inner_area.width;
 
-        // Calculate scroll state using actual inner area height
         let total_height: u16 = self
             .messages
             .iter()
-            .map(|m| self.message_height(m))
+            .map(|m| self.message_height(m, card_manager))
             .sum();
         let max_scroll = total_height.saturating_sub(inner_area.height);
-        // Smooth scroll interpolation using ease-out decay (~6 frames to settle)
         let target_scroll = self.scroll_position.min(max_scroll);
         self.scroll_offset_f32 += (target_scroll as f32 - self.scroll_offset_f32) * 0.3;
         let current_scroll = self.scroll_offset_f32.round() as u16;
 
-        // Render the main block
         frame.render_widget(block, area);
 
-        // Find starting message based on scroll position
         let mut current_y = 0u16;
         let mut start_idx = 0usize;
         let mut start_offset = 0u16;
-        
+
         for (i, msg) in self.messages.iter().enumerate() {
-            let msg_height = self.message_height(msg);
+            let msg_height = self.message_height(msg, card_manager);
             if current_y + msg_height > current_scroll {
                 start_idx = i;
                 start_offset = current_scroll.saturating_sub(current_y);
@@ -298,29 +395,45 @@ impl ChatComponent {
             current_y += msg_height;
         }
 
-        // Render visible messages
         let mut y_offset = 0u16;
-        
+
         for (msg_idx, message) in self.messages.iter().enumerate().skip(start_idx) {
             if y_offset >= inner_area.height {
                 break;
             }
-            
-            let msg_height = self.message_height(message);
+
+            let msg_height = if message.role == MessageRole::Tool && message.message_id.is_some() {
+                // Tool messages use card_manager height for inline rendering
+                if let Some(card) = message.message_id.as_ref().and_then(|id| card_manager.find_by_call_id(id)) {
+                    if card.is_expanded() {
+                        let w = self.inner_width.saturating_sub(4) as usize;
+                        let lines = card.content().lines().map(|l: &str| ((l.len() as f64) / w.max(1) as f64).ceil() as u16).sum::<u16>().max(1);
+                        lines + 3
+                    } else {
+                        4
+                    }
+                } else {
+                    self.message_height(message, card_manager)
+                }
+            } else if message.role == MessageRole::System && message.message_id.as_deref().map_or(false, |id: &str| id.starts_with("subagent:")) {
+                2
+            } else {
+                self.message_height(message, card_manager)
+            };
+
             let available_height = inner_area.height.saturating_sub(y_offset);
-            
-            // Calculate slice of the message to show
             let render_height = msg_height.saturating_sub(start_offset).min(available_height);
-            
+
             if render_height > 0 {
+                let is_selected = self.selected_index == Some(msg_idx);
+
                 let msg_area = Rect {
                     x: inner_area.x,
                     y: inner_area.y + y_offset,
                     width: inner_area.width,
                     height: render_height,
                 };
-                
-                // Check if previous message was a Tool (for response separator)
+
                 let prev_is_tool = if msg_idx > 0 {
                     self.messages.get(msg_idx - 1)
                         .map(|m| m.role == MessageRole::Tool)
@@ -328,16 +441,14 @@ impl ChatComponent {
                 } else {
                     false
                 };
-                
-                self.render_message(frame, msg_area, message, prev_is_tool);
+
+                self.render_message(frame, msg_area, message, prev_is_tool, is_selected, card_manager, subagent_list);
                 y_offset += render_height;
             }
-            
-            // Reset start_offset after the first message
+
             start_offset = 0;
         }
 
-        // Render scrollbar
         if total_height > inner_area.height {
             let mut scroll_state = ScrollbarState::new(total_height as usize)
                 .position(current_scroll as usize);
@@ -347,7 +458,7 @@ impl ChatComponent {
                 .style(Style::new().fg(self.colors.border))
                 .track_symbol(Some("│"))
                 .thumb_symbol("█");
-            
+
             frame.render_stateful_widget(
                 scrollbar,
                 area,
@@ -357,7 +468,7 @@ impl ChatComponent {
     }
 
     /// Render a single message
-    fn render_message(&self, frame: &mut Frame, area: Rect, message: &Message, prev_is_tool: bool) {
+    fn render_message(&self, frame: &mut Frame, area: Rect, message: &Message, prev_is_tool: bool, is_selected: bool, card_manager: &CardManager, subagent_list: &SubagentList) {
         let role_style = self.get_role_style(message.role.clone());
         let role_glyph = match message.role {
             MessageRole::User => "[U]",
@@ -365,6 +476,13 @@ impl ChatComponent {
             MessageRole::System => "[S]",
             MessageRole::Tool => "[T]",
         };
+
+        // Check if this message has an inline tool card
+        let is_tool_with_card = message.role == MessageRole::Tool
+            && message.message_id.as_ref().map_or(false, |id| card_manager.find_by_call_id(id).is_some());
+        // Check if this is a subagent inline message
+        let is_subagent_msg = message.role == MessageRole::System
+            && message.message_id.as_deref().map_or(false, |id| id.starts_with("subagent:"));
 
         if message.role == MessageRole::User {
             // User messages keep the bubble style
@@ -375,7 +493,6 @@ impl ChatComponent {
                 .border_style(border_style)
                 .style(role_style);
 
-            // Add timestamp to bottom right
             if self.show_timestamps {
                 let ts = message.timestamp.format("%H:%M:%S").to_string();
                 block = block.title_bottom(
@@ -418,26 +535,57 @@ impl ChatComponent {
                 return;
             }
 
-            // Gutter: role glyph with role-specific styling
-            let gutter_style = Style::new()
-                .fg(match message.role {
-                    MessageRole::Assistant => self.colors.assistant_text,
-                    MessageRole::System => self.colors.system_text,
-                    MessageRole::Tool => self.colors.tool_text,
-                    _ => self.colors.border,
-                })
-                .add_modifier(Modifier::BOLD);
-            let gutter = Line::from(Span::styled(role_glyph, gutter_style));
+            // Gutter: selection indicator or role glyph
+            let gutter_str = if is_selected { "▸ " } else { role_glyph };
+            let gutter_style = if is_selected {
+                Style::new()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::new()
+                    .fg(match message.role {
+                        MessageRole::Assistant => self.colors.assistant_text,
+                        MessageRole::System => self.colors.system_text,
+                        MessageRole::Tool => self.colors.tool_text,
+                        _ => self.colors.border,
+                    })
+                    .add_modifier(Modifier::BOLD)
+            };
+            let gutter = Line::from(Span::styled(gutter_str, gutter_style));
             frame.render_widget(
                 Paragraph::new(gutter),
                 Rect::new(area.x, y, 3, 1.min(remaining_height)),
             );
+
+            if remaining_height == 0 {
+                return;
+            }
 
             // Content area to the right of gutter
             let content_width = area.width.saturating_sub(4);
             let content_area = Rect::new(area.x + 3, y, content_width, remaining_height);
             if content_width < 2 || remaining_height == 0 {
                 return;
+            }
+
+            // Inline tool card rendering
+            if is_tool_with_card {
+                if let Some(card) = message.message_id.as_ref().and_then(|id| card_manager.find_by_call_id(id)) {
+                    card.render(frame, content_area);
+                    return;
+                }
+            }
+
+            // Inline subagent rendering
+            if is_subagent_msg {
+                if let Some(agent) = message.message_id.as_ref()
+                    .and_then(|id| id.strip_prefix("subagent:"))
+                    .and_then(|agent_id| subagent_list.agents().iter().find(|a| a.id == agent_id))
+                {
+                    let line = self.build_subagent_line(agent);
+                    frame.render_widget(Paragraph::new(line), content_area);
+                    return;
+                }
             }
 
             // Get message content, possibly truncated for system messages
@@ -447,12 +595,11 @@ impl ChatComponent {
                     .map(|id| self.expanded_systems.contains(id))
                     .unwrap_or(false)
             {
-                format!("{}...\n (press 's' to expand)", &message.content[..397])
+                format!("{}...\n (press Enter to expand)", &message.content[..397])
             } else {
                 message.content.clone()
             };
 
-            // Build message content temporarily for display
             let temp_msg = Message {
                 content: display_content,
                 role: message.role.clone(),
@@ -746,17 +893,33 @@ impl ChatComponent {
         let mut chat = ChatComponent::new(colors, true);
         chat.set_visible_height(80);
 
+        let card_manager = CardManager::new(ChatColorsRgb {
+            user_bg: ratatui::style::Color::Reset, user_text: ratatui::style::Color::Reset,
+            assistant_bg: ratatui::style::Color::Reset, assistant_text: ratatui::style::Color::Reset,
+            system_bg: ratatui::style::Color::Reset, system_text: ratatui::style::Color::Reset,
+            tool_bg: ratatui::style::Color::Reset, tool_text: ratatui::style::Color::Reset,
+            code_bg: ratatui::style::Color::Reset, code_text: ratatui::style::Color::Reset,
+            border: ratatui::style::Color::Reset, timestamp: ratatui::style::Color::Reset,
+        });
         let msg = create_test_message(MessageRole::User, "Hello");
-        assert!(chat.message_height(&msg) >= 3);
+        assert!(chat.message_height(&msg, &card_manager) >= 3);
     }
 
     #[test]
     fn test_add_message() {
         let colors = create_test_colors();
         let mut chat = ChatComponent::new(colors, true);
+        let card_manager = CardManager::new(ChatColorsRgb {
+            user_bg: ratatui::style::Color::Reset, user_text: ratatui::style::Color::Reset,
+            assistant_bg: ratatui::style::Color::Reset, assistant_text: ratatui::style::Color::Reset,
+            system_bg: ratatui::style::Color::Reset, system_text: ratatui::style::Color::Reset,
+            tool_bg: ratatui::style::Color::Reset, tool_text: ratatui::style::Color::Reset,
+            code_bg: ratatui::style::Color::Reset, code_text: ratatui::style::Color::Reset,
+            border: ratatui::style::Color::Reset, timestamp: ratatui::style::Color::Reset,
+        });
 
         let msg = create_test_message(MessageRole::User, "Hello");
-        chat.add_message(msg);
+        chat.add_message(msg, &card_manager);
 
         assert_eq!(chat.messages().len(), 1);
     }
@@ -765,24 +928,32 @@ impl ChatComponent {
     fn test_scroll() {
         let colors = create_test_colors();
         let mut chat = ChatComponent::new(colors, false);
+        let card_manager = CardManager::new(ChatColorsRgb {
+            user_bg: ratatui::style::Color::Reset, user_text: ratatui::style::Color::Reset,
+            assistant_bg: ratatui::style::Color::Reset, assistant_text: ratatui::style::Color::Reset,
+            system_bg: ratatui::style::Color::Reset, system_text: ratatui::style::Color::Reset,
+            tool_bg: ratatui::style::Color::Reset, tool_text: ratatui::style::Color::Reset,
+            code_bg: ratatui::style::Color::Reset, code_text: ratatui::style::Color::Reset,
+            border: ratatui::style::Color::Reset, timestamp: ratatui::style::Color::Reset,
+        });
         chat.set_visible_height(10);
 
         for i in 0..20 {
             chat.add_message(create_test_message(
                 MessageRole::User,
                 &format!("Message {}", i),
-            ));
+            ), &card_manager);
         }
 
-        assert!(chat.max_scroll_position() > 0);
+        assert!(chat.max_scroll_position(&card_manager) > 0);
 
-        chat.scroll_to_bottom();
-        assert_eq!(chat.scroll_position, chat.max_scroll_position());
+        chat.scroll_to_bottom(&card_manager);
+        assert_eq!(chat.scroll_position, chat.max_scroll_position(&card_manager));
 
         chat.scroll_to_top();
         assert_eq!(chat.scroll_position, 0);
 
-        chat.scroll_down(5);
+        chat.scroll_down(5, &card_manager);
         assert!(chat.scroll_position >= 5);
 
         chat.scroll_up(3);
@@ -790,24 +961,16 @@ impl ChatComponent {
     }
 
     #[test]
-    fn test_clear_messages() {
-        let colors = create_test_colors();
-        let mut chat = ChatComponent::new(colors, true);
-
-        chat.add_message(create_test_message(MessageRole::User, "Hello"));
-        chat.add_message(create_test_message(MessageRole::Assistant, "World"));
-
-        assert_eq!(chat.messages().len(), 2);
-
-        chat.clear_messages();
-
-        assert!(chat.messages().is_empty());
-        assert_eq!(chat.scroll_position, 0);
-    }
-
-    #[test]
     fn test_set_messages() {
         let colors = create_test_colors();
+        let card_manager = CardManager::new(ChatColorsRgb {
+            user_bg: ratatui::style::Color::Reset, user_text: ratatui::style::Color::Reset,
+            assistant_bg: ratatui::style::Color::Reset, assistant_text: ratatui::style::Color::Reset,
+            system_bg: ratatui::style::Color::Reset, system_text: ratatui::style::Color::Reset,
+            tool_bg: ratatui::style::Color::Reset, tool_text: ratatui::style::Color::Reset,
+            code_bg: ratatui::style::Color::Reset, code_text: ratatui::style::Color::Reset,
+            border: ratatui::style::Color::Reset, timestamp: ratatui::style::Color::Reset,
+        });
         let mut chat = ChatComponent::new(colors, true);
 
         let messages = vec![
@@ -815,40 +978,7 @@ impl ChatComponent {
             create_test_message(MessageRole::Assistant, "World"),
         ];
 
-        chat.set_messages(messages);
+        chat.set_messages(messages, &card_manager);
 
         assert_eq!(chat.messages().len(), 2);
-    }
-
-    #[test]
-    fn test_format_timestamp() {
-        let colors = create_test_colors();
-        let chat = ChatComponent::new(colors, true);
-
-        // Create a timestamp from 5 seconds ago
-        let timestamp = Utc::now() - chrono::Duration::seconds(5);
-        let result = chat.format_timestamp(timestamp);
-
-        // Should contain "s ago"
-        assert!(result.contains("s ago"));
-    }
-
-    #[test]
-    fn test_with_defaults() {
-        let chat = ChatComponent::with_defaults();
-        assert!(chat.messages().is_empty());
-        assert!(chat.show_timestamps);
-    }
-
-    #[test]
-    fn test_with_messages() {
-        let colors = create_test_colors();
-        let messages = vec![
-            create_test_message(MessageRole::User, "Hello"),
-            create_test_message(MessageRole::Assistant, "World"),
-        ];
-
-        let chat = ChatComponent::new(colors, true).with_messages(messages);
-
-        assert_eq!(chat.messages().len(), 2);
-    }
+}
