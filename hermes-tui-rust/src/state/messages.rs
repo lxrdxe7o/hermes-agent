@@ -318,6 +318,24 @@ impl MessageHistory {
     pub fn contains_id(&self, message_id: &str) -> bool {
         self.messages.iter().any(|m| m.message_id.as_deref() == Some(message_id))
     }
+    /// Update a message's content by message ID
+    pub fn update_message_by_id(&mut self, message_id: &str, content: String) -> Option<Message> {
+        if let Some(msg) = self.messages.iter_mut().find(|m| m.message_id.as_deref() == Some(message_id)) {
+            msg.content = content;
+            Some(msg.clone())
+        } else {
+            None
+        }
+    }
+    /// Update a message's content by message ID
+    pub fn update_message_by_id(&mut self, message_id: &str, content: String) -> Option<Message> {
+        if let Some(msg) = self.messages.iter_mut().find(|m| m.message_id.as_deref() == Some(message_id)) {
+            msg.content = content;
+            Some(msg.clone())
+        } else {
+            None
+        }
+    }
 }
 
 impl Default for MessageHistory {
