@@ -11,7 +11,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::state::config::{ChatColorsRgb, InputMode, ThemeColorsRgb};
+use crate::state::config::{ChatColorsRgb, FocusPane, InputMode, ThemeColorsRgb};
 
 /// Status bar item for displaying information
 #[derive(Debug, Clone)]
@@ -46,6 +46,8 @@ pub struct Toolbar {
     chat_colors: ChatColorsRgb,
     /// Current input mode
     input_mode: InputMode,
+    /// Current focus pane
+    focus_pane: FocusPane,
     /// Whether the gateway is thinking
     is_thinking: bool,
     /// Current spinner index
@@ -65,6 +67,7 @@ impl Toolbar {
             is_thinking: false,
             spinner_idx: 0,
             verb_idx: 0,
+            focus_pane: FocusPane::default(),
         }
     }
 
@@ -101,6 +104,11 @@ impl Toolbar {
     /// Set the input mode
     pub fn set_input_mode(&mut self, mode: InputMode) {
         self.input_mode = mode;
+    }
+
+    /// Set the current focus pane
+    pub fn set_focus_pane(&mut self, pane: FocusPane) {
+        self.focus_pane = pane;
     }
 
     /// Set the theme colors
@@ -172,6 +180,15 @@ impl Toolbar {
             InputMode::Insert => "Insert",
             InputMode::Command => "Command",
         };
+
+        // Focus pane indicator
+        let focus_label = match self.focus_pane {
+            FocusPane::Chat => "[1] Chat",
+            FocusPane::Sidebar => "[2] Sidebar",
+            FocusPane::Composer => "[3] Composer",
+            FocusPane::Toolbar => "[4] Toolbar",
+        };
+        self.add_text(focus_label);
         self.add_text(format!("Mode: {}", mode_text));
     }
 

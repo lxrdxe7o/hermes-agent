@@ -543,6 +543,20 @@ pub enum InputMode {
     Command,
 }
 
+/// Focus pane for keyboard navigation between UI panels
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum FocusPane {
+    /// Main chat/transcript panel
+    #[default]
+    Chat = 0,
+    /// Sidebar panel (subagents + sessions)
+    Sidebar = 1,
+    /// Input composer panel
+    Composer = 2,
+    /// Toolbar/status bar panel
+    Toolbar = 3,
+}
+
 impl Default for InputMode {
     fn default() -> Self {
         Self::Normal

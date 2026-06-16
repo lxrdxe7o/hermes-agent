@@ -10,7 +10,8 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen, SetTitle},
 };
 use log::{debug, error, info, warn};
-use ratatui::{layout::{Constraint, Direction, Layout, Rect}, Terminal, backend::CrosstermBackend};
+use ratatui::{layout::{Constraint, Direction, Layout, Rect}, style::{Color, Style}, widgets::{Block, BorderType}, Terminal, backend::CrosstermBackend};
+use ratatui::style::Stylize;
 use std::io::{self, Stdout, Write};
 use std::time::Duration;
 
@@ -22,6 +23,7 @@ use crate::protocol::client::GatewayClient;
 use crate::protocol::types::*;
 use crate::state::{config::TuiConfig, messages::{Message, MessageHistory}, session::{Session, SessionManager}};
 use crate::state::config::InputMode;
+use crate::state::config::FocusPane;
 use crate::ui::{chat::ChatComponent, composer::InputComposer, toolbar::Toolbar};
 use crate::ui::prompts::PromptManager;
 use crate::ui::completions::CompletionPopup;
@@ -90,6 +92,10 @@ pub struct App {
     current_model: Option<String>,
     /// Current provider name from the gateway session info
     current_provider: Option<String>,
+    /// Currently focused pane for keyboard navigation
+    focus_pane: FocusPane,
+    /// Global animation frame counter for animated borders
+    animation_frame: u64,
 }
 
 impl App {
@@ -157,6 +163,8 @@ impl App {
             mouse_context: MouseContext::new(),
             current_model: None,
             current_provider: None,
+            focus_pane: FocusPane::default(),
+            animation_frame: 0,
         })
     }
 
@@ -340,6 +348,36 @@ impl App {
         self.toolbar.set_input_mode(mode);
     }
 
+    /// Set the focused pane and adjust input mode accordingly
+    pub fn set_focus_pane(&mut self, pane: FocusPane) {
+        self.focus_pane = pane;
+        match pane {
+            FocusPane::Chat => {
+                self.set_input_mode(InputMode::Normal);
+                self.input_composer.set_active(false);
+            }
+            FocusPane::Sidebar => {
+                self.set_input_mode(InputMode::Normal);
+                self.input_composer.set_active(false);
+            }
+            FocusPane::Composer => {
+                self.set_input_mode(InputMode::Insert);
+                self.input_composer.set_active(true);
+            }
+            FocusPane::Toolbar => {
+                self.set_input_mode(InputMode::Normal);
+                self.input_composer.set_active(false);
+            }
+        }
+        // Update toolbar with new focus pane
+        self.toolbar.set_focus_pane(pane);
+    }
+
+    /// Get the current focus pane
+    pub fn focus_pane(&self) -> FocusPane {
+        self.focus_pane
+    }
+
     /// Set the current input text
     pub fn set_current_input(&mut self, input: String) {
         self.current_input = input;
@@ -484,6 +522,9 @@ impl App {
             // Update toolbar animation
             self.toolbar.tick(self.thinking);
 
+            // Increment animation frame for animated borders
+            self.animation_frame = self.animation_frame.wrapping_add(1);
+
             // Draw UI
             self.draw()?;
         }
@@ -580,6 +621,28 @@ impl App {
         // Check for quit keys first
         if self.check_quit_key(key) {
             return Ok(());
+        }
+
+        // Number keys 1-4 for focus pane navigation
+        // These work regardless of current mode or active overlays
+        match key.code {
+            KeyCode::Char('1') => {
+                self.set_focus_pane(FocusPane::Chat);
+                return Ok(());
+            }
+            KeyCode::Char('2') => {
+                self.set_focus_pane(FocusPane::Sidebar);
+                return Ok(());
+            }
+            KeyCode::Char('3') => {
+                self.set_focus_pane(FocusPane::Composer);
+                return Ok(());
+            }
+            KeyCode::Char('4') => {
+                self.set_focus_pane(FocusPane::Toolbar);
+                return Ok(());
+            }
+            _ => {}
         }
 
         // If a prompt is active, let the prompt manager handle keys
@@ -1617,6 +1680,25 @@ impl App {
         let messages = self.messages().all_messages().clone();
         self.chat_component.set_messages(messages, &self.card_manager);
     }
+
+    /// Compute an animated border style for a panel
+    fn animated_border_style(focused: bool, animation_frame: u64, base_color: Color) -> Style {
+        if !focused {
+            return Style::default().fg(base_color);
+        }
+        // Cycle through 6 ANSI colors every 3 frames (~20fps cycling)
+        let cycle = ((animation_frame / 3) % 6) as u8;
+        let color = match cycle {
+            0 => Color::Indexed(1),   // Red
+            1 => Color::Indexed(3),   // Yellow
+            2 => Color::Indexed(2),   // Green
+            3 => Color::Indexed(6),   // Cyan
+            4 => Color::Indexed(4),   // Blue
+            5 => Color::Indexed(5),   // Magenta
+            _ => base_color,
+        };
+        Style::default().fg(color).bold()
+    }
     /// Draw the UI
     pub fn draw(&mut self) -> Result<()> {
         // Update toolbar state before drawing
@@ -1671,6 +1753,11 @@ impl App {
         let config_ptr: *const TuiConfig = &self.config;
         let subagent_list_ptr: *const SubagentList = &self.subagent_list;
         let chat_component_ptr: *mut ChatComponent = &mut self.chat_component;
+        // Copy focus/animation values for the closure (these are Copy types)
+        let focus_pane = self.focus_pane;
+        let animation_frame = self.animation_frame;
+        let config_snapshot = unsafe { &*config_ptr };
+        let base_border_color: Color = Color::from(config_snapshot.theme.chat.border.clone());
         
         self.terminal.draw(move |frame| {
 
@@ -1699,8 +1786,8 @@ impl App {
                 Constraint::Length(banner_height),
                 Constraint::Min(1),
                 Constraint::Length(activity_height),
+                Constraint::Length(5),
                 Constraint::Length(3),
-                Constraint::Length(1),
             ];
             
             let main_layout = Layout::default()
@@ -1717,12 +1804,16 @@ impl App {
                 banner.render_mini(frame, main_layout[0]);
             }
             
-            // Chat
-            // Chat
+            // Chat with animated border
             let chat_component = unsafe { &mut *chat_component_ptr };
             let chat_area = main_layout[1];
-            chat_component.set_visible_height(chat_area.height.saturating_sub(2));
-            chat_component.render(frame, chat_area, unsafe { &*card_manager_ptr }, unsafe { &*subagent_list_ptr });
+            let chat_block = Block::bordered()
+                .border_type(BorderType::Thick)
+                .border_style(Self::animated_border_style(focus_pane == FocusPane::Chat, animation_frame, base_border_color));
+            let chat_inner = chat_block.inner(chat_area);
+            frame.render_widget(chat_block, chat_area);
+            chat_component.set_visible_height(chat_inner.height.saturating_sub(2));
+            chat_component.render(frame, chat_inner, unsafe { &*card_manager_ptr }, unsafe { &*subagent_list_ptr });
             
             // Activity (hashline only - cards are drawn inline in chat)
             if activity_height > 0 {
@@ -1732,24 +1823,38 @@ impl App {
                     hashline_viewer.render(block, activity_area, frame);
                 }
             }
-            
-            // Composer
+            // Composer with animated border
             let input_composer = unsafe { &*input_composer_ptr };
-            input_composer.render_clean(frame, main_layout[3]);
+            let composer_block = Block::bordered()
+                .border_type(BorderType::Thick)
+                .border_style(Self::animated_border_style(focus_pane == FocusPane::Composer, animation_frame, base_border_color));
+            let composer_inner = composer_block.inner(main_layout[3]);
+            frame.render_widget(composer_block, main_layout[3]);
+            input_composer.render_clean(frame, composer_inner);
             
-            // Toolbar
+            // Toolbar with animated border
             let toolbar = unsafe { &*toolbar_ptr };
-            toolbar.render(frame, main_layout[4]);
+            let toolbar_block = Block::bordered()
+                .border_type(BorderType::Thick)
+                .border_style(Self::animated_border_style(focus_pane == FocusPane::Toolbar, animation_frame, base_border_color));
+            let toolbar_inner = toolbar_block.inner(main_layout[4]);
+            frame.render_widget(toolbar_block, main_layout[4]);
+            toolbar.render(frame, toolbar_inner);
 
-            // Sidebar
+            // Sidebar with animated border
             if show_sidebar && sidebar_area.width > 0 {
+                let sidebar_block = Block::bordered()
+                    .border_type(BorderType::Thick)
+                    .border_style(Self::animated_border_style(focus_pane == FocusPane::Sidebar, animation_frame, base_border_color));
+                frame.render_widget(&sidebar_block, sidebar_area);
+                let sidebar_inner = sidebar_block.inner(sidebar_area);
                 let sidebar_chunks = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([
                         Constraint::Min(1),
                         Constraint::Max(n_sessions * 3 + 3),
                     ])
-                    .split(sidebar_area);
+                    .split(sidebar_inner);
 
                 // Subagents
                 let subagent_list = unsafe { &*subagent_list_ptr };
@@ -1999,6 +2104,8 @@ mod tests {
             mouse_context: MouseContext::new(),
             current_model: None,
             current_provider: None,
+            focus_pane: FocusPane::default(),
+            animation_frame: 0,
         };
     }
     
@@ -2040,6 +2147,8 @@ mod tests {
             mouse_context: MouseContext::new(),
             current_model: None,
             current_provider: None,
+            focus_pane: FocusPane::default(),
+            animation_frame: 0,
         };
         assert!(app.input_composer().get_input().is_empty());
         assert!(app.toolbar().input_mode() == InputMode::Normal);
