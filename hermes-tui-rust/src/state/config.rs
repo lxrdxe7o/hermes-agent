@@ -801,6 +801,16 @@ pub enum InputMode {
     Command,
 }
 
+/// Pane that can receive focus for keyboard navigation
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum FocusPane {
+    #[default]
+    Chat,
+    Composer,
+    Toolbar,
+    Sidebar,
+}
+
 /// Main TUI configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TuiConfig {

@@ -16,6 +16,9 @@ use log::{debug, error, info, warn};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Style},
+    widgets::{Block, BorderType},
+    style::Stylize,
     Terminal,
 };
 use std::io::{self, Stdout, Write};
@@ -36,6 +39,7 @@ use crate::protocol::types::{
     SessionResumeRequest, SessionResumeResponse, SlashExecRequest, SlashExecResponse,
     SubagentEvent, SudoRequest, SudoResponse, ToolComplete, ToolProgress, ToolStart, TuiRequest,
 };
+use crate::state::config::FocusPane;
 use crate::state::config::InputMode;
 use crate::state::{
     config::TuiConfig,
@@ -130,6 +134,10 @@ pub struct App {
     bebop_gif: Option<crate::ui::gif::AnimatedGif>,
     /// Current view (Dashboard, IDE, Kanban, Chat)
     current_view: ViewState,
+    /// Currently focused pane for keyboard navigation
+    focus_pane: FocusPane,
+    /// Global animation frame counter for animated borders
+    animation_frame: u64,
 }
 
 impl App {
@@ -203,6 +211,8 @@ impl App {
             current_provider: None,
             bebop_gif: crate::ui::gif::AnimatedGif::new(include_bytes!("../bebop.gif"), 100).ok(),
             current_view: ViewState::Dashboard,
+            focus_pane: FocusPane::default(),
+            animation_frame: 0,
         })
     }
 
@@ -404,6 +414,36 @@ impl App {
         self.toolbar.set_input_mode(mode);
     }
 
+    /// Set the focused pane and adjust input mode accordingly
+    pub fn set_focus_pane(&mut self, pane: FocusPane) {
+        self.focus_pane = pane;
+        match pane {
+            FocusPane::Chat => {
+                self.set_input_mode(InputMode::Normal);
+                self.input_composer.set_active(false);
+            }
+            FocusPane::Sidebar => {
+                self.set_input_mode(InputMode::Normal);
+                self.input_composer.set_active(false);
+            }
+            FocusPane::Composer => {
+                self.set_input_mode(InputMode::Insert);
+                self.input_composer.set_active(true);
+            }
+            FocusPane::Toolbar => {
+                self.set_input_mode(InputMode::Normal);
+                self.input_composer.set_active(false);
+            }
+        }
+        // Update toolbar with new focus pane
+        self.toolbar.set_focus_pane(pane);
+    }
+
+    /// Get the current focus pane
+    pub fn focus_pane(&self) -> FocusPane {
+        self.focus_pane
+    }
+
     /// Set the current input text
     pub fn set_current_input(&mut self, input: String) {
         self.current_input = input;
@@ -560,6 +600,9 @@ impl App {
             // Update toolbar animation
             self.toolbar.tick(self.thinking);
 
+            // Increment animation frame for animated borders
+            self.animation_frame = self.animation_frame.wrapping_add(1);
+
             // Draw UI
             self.draw()?;
         }
@@ -671,6 +714,7 @@ impl App {
             return Ok(());
         }
 
+        // Alt+1 through Alt+4 for top-level view switching (Dashboard, IDE, Kanban, Chat)
         if key.code == KeyCode::Char('1')
             && key.modifiers.contains(crossterm::event::KeyModifiers::ALT)
         {
@@ -694,6 +738,28 @@ impl App {
         {
             self.current_view = ViewState::Chat;
             return Ok(());
+        }
+
+        // Number keys 1-4 for focus pane navigation (within Chat view)
+        // These work regardless of current mode or active overlays
+        match key.code {
+            KeyCode::Char('1') => {
+                self.set_focus_pane(FocusPane::Chat);
+                return Ok(());
+            }
+            KeyCode::Char('2') => {
+                self.set_focus_pane(FocusPane::Sidebar);
+                return Ok(());
+            }
+            KeyCode::Char('3') => {
+                self.set_focus_pane(FocusPane::Composer);
+                return Ok(());
+            }
+            KeyCode::Char('4') => {
+                self.set_focus_pane(FocusPane::Toolbar);
+                return Ok(());
+            }
+            _ => {}
         }
 
         // If a prompt is active, let the prompt manager handle keys
@@ -1006,15 +1072,15 @@ impl App {
             return Ok(());
         }
 
-        // Check for Enter key in Insert mode - submit prompt
-        if self.input_mode == InputMode::Insert
+        // Check for Enter key in Insert or Command mode - submit prompt
+        if (self.input_mode == InputMode::Insert || self.input_mode == InputMode::Command)
             && code == KeyCode::Enter
             && !modifiers.contains(KeyModifiers::SHIFT)
-            && !self.input_composer.get_input().is_empty()
         {
-            self.submit_prompt()?;
-            self.current_input = self.input_composer.get_input().to_string();
-            return Ok(());
+            if !self.input_composer.get_input().is_empty() {
+                self.submit_prompt()?;
+                return Ok(());
+            }
         }
 
         // Check for '/' key - switch to command mode
@@ -1068,6 +1134,12 @@ impl App {
                 self.current_input = self.input_composer.get_input().to_string();
                 self.input_mode = self.input_composer.input_mode();
                 self.maybe_request_completion()?;
+            }
+
+            // Request slash completions while typing in Command mode
+            if self.input_mode == InputMode::Command && handled {
+                let text = self.input_composer.get_input().to_string();
+                let _ = self.send_gateway_request(TuiRequest::CompleteSlash { text });
             }
         }
 
@@ -1465,8 +1537,10 @@ impl App {
             GatewayMessage::ModelOptions(response) => {
                 self.handle_model_options(response)?;
             }
+
+            // Unhandled message types
             _ => {
-                // Ignore unhandled gateway messages for now
+                debug!("Unhandled gateway message type");
             }
         }
 
@@ -1989,6 +2063,25 @@ impl App {
         self.chat_component
             .set_messages(messages, &self.card_manager);
     }
+
+    /// Compute an animated border style for a panel
+    fn animated_border_style(focused: bool, animation_frame: u64, base_color: Color) -> Style {
+        if !focused {
+            return Style::default().fg(base_color);
+        }
+        // Cycle through 6 ANSI colors every 3 frames (~20fps cycling)
+        let cycle = ((animation_frame / 3) % 6) as u8;
+        let color = match cycle {
+            0 => Color::Indexed(1),   // Red
+            1 => Color::Indexed(3),   // Yellow
+            2 => Color::Indexed(2),   // Green
+            3 => Color::Indexed(6),   // Cyan
+            4 => Color::Indexed(4),   // Blue
+            5 => Color::Indexed(5),   // Magenta
+            _ => base_color,
+        };
+        Style::default().fg(color).bold()
+    }
     /// Draw the UI
     pub fn draw(&mut self) -> Result<()> {
         // Update toolbar state before drawing
@@ -2054,6 +2147,10 @@ impl App {
         // Extract values needed inside the move closure
         let current_view = self.current_view;
         let gif_ptr: *mut Option<crate::ui::gif::AnimatedGif> = &mut self.bebop_gif;
+        let focus_pane = self.focus_pane;
+        let animation_frame = self.animation_frame;
+        let config_snapshot = unsafe { &*config_ptr };
+        let base_border_color: Color = Color::from(config_snapshot.theme.chat.border.clone());
 
         self.terminal.draw(move |frame| {
             use ratatui::layout::Alignment;
@@ -2179,17 +2276,18 @@ impl App {
                     toolbar.render(frame, kanban_chunks[2]);
                 }
                 ViewState::Chat => {
-                    // Legacy layout with banner + chat + activity + composer + toolbar + sidebar
+                    // Chat view with animated focus-pane borders
                     let banner_height = if main_area.height > 40 { 7 } else { 1 };
 
                     let main_layout = Layout::default()
                         .direction(Direction::Vertical)
+                        .margin(0)
                         .constraints([
                             Constraint::Length(banner_height),
                             Constraint::Min(1),
                             Constraint::Length(activity_height),
+                            Constraint::Length(5),
                             Constraint::Length(3),
-                            Constraint::Length(1),
                         ])
                         .split(main_area);
 
@@ -2201,19 +2299,18 @@ impl App {
                         banner.render_mini(frame, main_layout[0]);
                     }
 
-                    // Chat
+                    // Chat with animated border
                     let chat_component = unsafe { &mut *chat_component_ptr };
                     let chat_area = main_layout[1];
-                    chat_component.set_visible_height(chat_area.height.saturating_sub(2));
-                    chat_component.render(
-                        frame,
-                        chat_area,
-                        unsafe { &*card_manager_ptr },
-                        unsafe { &*subagent_list_ptr },
-                        connected,
-                    );
+                    let chat_block = Block::bordered()
+                        .border_type(BorderType::Thick)
+                        .border_style(Self::animated_border_style(focus_pane == FocusPane::Chat, animation_frame, base_border_color));
+                    let chat_inner = chat_block.inner(chat_area);
+                    frame.render_widget(chat_block, chat_area);
+                    chat_component.set_visible_height(chat_inner.height.saturating_sub(2));
+                    chat_component.render(frame, chat_inner, unsafe { &*card_manager_ptr }, unsafe { &*subagent_list_ptr }, connected);
 
-                    // Activity (hashline)
+                    // Activity (hashline only - cards are drawn inline in chat)
                     if activity_height > 0 {
                         let hashline_viewer = unsafe { &*hashline_viewer_ptr };
                         let activity_area = main_layout[2];
@@ -2221,33 +2318,48 @@ impl App {
                             hashline_viewer.render(block, activity_area, frame);
                         }
                     }
-
-                    // Composer
+                    // Composer with animated border
                     let input_composer = unsafe { &*input_composer_ptr };
-                    input_composer.render_clean(frame, main_layout[3]);
+                    let composer_block = Block::bordered()
+                        .border_type(BorderType::Thick)
+                        .border_style(Self::animated_border_style(focus_pane == FocusPane::Composer, animation_frame, base_border_color));
+                    let composer_inner = composer_block.inner(main_layout[3]);
+                    frame.render_widget(composer_block, main_layout[3]);
+                    input_composer.render_clean(frame, composer_inner);
 
-                    // Toolbar
+                    // Toolbar with animated border
                     let toolbar = unsafe { &*toolbar_ptr };
-                    toolbar.render(frame, main_layout[4]);
+                    let toolbar_block = Block::bordered()
+                        .border_type(BorderType::Thick)
+                        .border_style(Self::animated_border_style(focus_pane == FocusPane::Toolbar, animation_frame, base_border_color));
+                    let toolbar_inner = toolbar_block.inner(main_layout[4]);
+                    frame.render_widget(toolbar_block, main_layout[4]);
+                    toolbar.render(frame, toolbar_inner);
 
-                    // Sidebar
+                    // Sidebar with animated border
                     if show_sidebar && sidebar_area.width > 0 {
+                        let sidebar_block = Block::bordered()
+                            .border_type(BorderType::Thick)
+                            .border_style(Self::animated_border_style(focus_pane == FocusPane::Sidebar, animation_frame, base_border_color));
+                        frame.render_widget(&sidebar_block, sidebar_area);
+                        let sidebar_inner = sidebar_block.inner(sidebar_area);
                         let sidebar_chunks = Layout::default()
                             .direction(Direction::Vertical)
-                            .constraints([Constraint::Min(1), Constraint::Max(n_sessions * 3 + 3)])
-                            .split(sidebar_area);
+                            .constraints([
+                                Constraint::Min(1),
+                                Constraint::Max(n_sessions * 3 + 3),
+                            ])
+                            .split(sidebar_inner);
 
+                        // Subagents
                         let subagent_list = unsafe { &*subagent_list_ptr };
+                        let sub_area = sidebar_chunks[0];
                         if !subagent_list.is_empty() {
-                            subagent_list.render(sidebar_chunks[0], frame);
+                            subagent_list.render(sub_area, frame);
                         }
 
-                        Self::draw_session_sidebar_inner(
-                            frame,
-                            sidebar_chunks[1],
-                            unsafe { &*config_ptr },
-                            session_manager_ptr,
-                        );
+                        // Session sidebar
+                        Self::draw_session_sidebar_inner(frame, sidebar_chunks[1], unsafe { &*config_ptr }, session_manager_ptr);
                     }
                 }
             }
@@ -2519,6 +2631,8 @@ mod tests {
             current_provider: None,
             bebop_gif: None,
             current_view: ViewState::Dashboard,
+            focus_pane: FocusPane::default(),
+            animation_frame: 0,
         };
     }
 
@@ -2566,6 +2680,8 @@ mod tests {
             current_provider: None,
             bebop_gif: None,
             current_view: ViewState::Dashboard,
+            focus_pane: FocusPane::default(),
+            animation_frame: 0,
         };
         assert!(app.input_composer().get_input().is_empty());
         assert!(app.toolbar().input_mode() == InputMode::Normal);

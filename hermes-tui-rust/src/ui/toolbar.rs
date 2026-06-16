@@ -137,6 +137,11 @@ impl Toolbar {
         self.input_mode
     }
 
+    /// Set the currently focused pane (used for animated borders)
+    pub fn set_focus_pane(&mut self, _pane: crate::state::config::FocusPane) {
+        // Focus pane state is tracked in App; the toolbar doesn't need it
+    }
+
     /// Update thinking status and increment spinner
     pub fn tick(&mut self, is_thinking: bool) {
         self.is_thinking = is_thinking;
