@@ -83,7 +83,11 @@ impl Message {
     }
 
     /// Create a streaming message (delta)
-    pub fn streaming_delta(role: MessageRole, content: impl Into<String>, message_id: Option<String>) -> Self {
+    pub fn streaming_delta(
+        role: MessageRole,
+        content: impl Into<String>,
+        message_id: Option<String>,
+    ) -> Self {
         Self {
             role,
             content: content.into(),
@@ -103,43 +107,50 @@ impl Message {
     }
 
     /// Check if this is a user message
+    #[must_use]
     pub fn is_user(&self) -> bool {
         self.role == MessageRole::User
     }
 
     /// Check if this is an assistant message
+    #[must_use]
     pub fn is_assistant(&self) -> bool {
         self.role == MessageRole::Assistant
     }
 
     /// Check if this is a system message
+    #[must_use]
     pub fn is_system(&self) -> bool {
         self.role == MessageRole::System
     }
 
     /// Check if this is a tool message
+    #[must_use]
     pub fn is_tool(&self) -> bool {
         self.role == MessageRole::Tool
     }
 
     /// Check if this is a tool message containing file edits
     /// (name contains "edit", "write", "patch")
+    #[must_use]
     pub fn is_edit_tool_message(&self) -> bool {
         if !self.is_tool() {
             return false;
         }
-        self.name.as_deref().map_or(false, |n| {
+        self.name.as_deref().is_some_and(|n| {
             let n_lower = n.to_lowercase();
             n_lower.contains("edit") || n_lower.contains("write") || n_lower.contains("patch")
         })
     }
 
     /// Check if this message is still streaming
+    #[must_use]
     pub fn is_streaming(&self) -> bool {
         self.streaming
     }
 
     /// Get the message content
+    #[must_use]
     pub fn content(&self) -> &str {
         &self.content
     }
@@ -171,11 +182,13 @@ pub struct MessageHistory {
 
 impl MessageHistory {
     /// Create a new message history with the default maximum size
+    #[must_use]
     pub fn new() -> Self {
         Self::with_capacity(MAX_MESSAGE_HISTORY)
     }
 
     /// Create a new message history with a custom maximum size
+    #[must_use]
     pub fn with_capacity(max_messages: usize) -> Self {
         Self {
             messages: VecDeque::with_capacity(max_messages),
@@ -190,6 +203,7 @@ impl MessageHistory {
     }
 
     /// Get the current session ID
+    #[must_use]
     pub fn session_id(&self) -> Option<&String> {
         self.session_id.as_ref()
     }
@@ -200,16 +214,17 @@ impl MessageHistory {
         if self.messages.len() >= self.max_messages {
             self.messages.pop_front();
         }
-        
+
         self.messages.push_back(message);
     }
-    
+
     /// Add a message to the history (alias for push)
     pub fn add_message(&mut self, message: Message) {
         self.push(message);
     }
-    
+
     /// Get all messages as a vector (owned)
+    #[must_use]
     pub fn all_messages(&self) -> Vec<Message> {
         self.messages.iter().cloned().collect()
     }
@@ -235,18 +250,21 @@ impl MessageHistory {
     }
 
     /// Get a message by index
+    #[must_use]
     pub fn get(&self, index: usize) -> Option<&Message> {
         self.messages.get(index)
     }
 
     /// Get the last message
+    #[must_use]
     pub fn last(&self) -> Option<&Message> {
         self.messages.back()
     }
 
     /// Check if the last message is currently streaming
+    #[must_use]
     pub fn has_streaming_message(&self) -> bool {
-        self.last().map_or(false, |m| m.is_streaming())
+        self.last().is_some_and(Message::is_streaming)
     }
 
     /// Get the last message (mutable)
@@ -255,21 +273,25 @@ impl MessageHistory {
     }
 
     /// Get all messages
+    #[must_use]
     pub fn messages(&self) -> &VecDeque<Message> {
         &self.messages
     }
 
     /// Get messages as a vector (for iteration)
+    #[must_use]
     pub fn to_vec(&self) -> Vec<&Message> {
         self.messages.iter().collect()
     }
 
     /// Number of messages in history
+    #[must_use]
     pub fn len(&self) -> usize {
         self.messages.len()
     }
 
     /// Check if history is empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.messages.is_empty()
     }
@@ -285,42 +307,60 @@ impl MessageHistory {
     }
 
     /// Get messages in a range
+    #[must_use]
     pub fn range(&self, start: usize, end: usize) -> Vec<&Message> {
-        self.messages.range(start..end.min(self.messages.len())).collect()
+        self.messages
+            .range(start..end.min(self.messages.len()))
+            .collect()
     }
 
     /// Get the most recent N messages
+    #[must_use]
     pub fn last_n(&self, n: usize) -> Vec<&Message> {
         let start = self.messages.len().saturating_sub(n);
         self.range(start, self.messages.len())
     }
 
     /// Find a message by message ID
+    #[must_use]
     pub fn find_by_id(&self, message_id: &str) -> Option<&Message> {
-        self.messages.iter().find(|m| m.message_id.as_deref() == Some(message_id))
+        self.messages
+            .iter()
+            .find(|m| m.message_id.as_deref() == Some(message_id))
     }
 
     /// Update or create a message by message ID
     pub fn upsert_by_id(&mut self, message: Message) {
         // If message has an ID, try to update existing message
         if let Some(id) = &message.message_id {
-            if let Some(existing) = self.messages.iter_mut().find(|m| m.message_id.as_deref() == Some(id)) {
+            if let Some(existing) = self
+                .messages
+                .iter_mut()
+                .find(|m| m.message_id.as_deref() == Some(id))
+            {
                 *existing = message;
                 return;
             }
         }
-        
+
         // Otherwise, just push the message
         self.push(message);
     }
 
     /// Check if a message with the given ID exists
+    #[must_use]
     pub fn contains_id(&self, message_id: &str) -> bool {
-        self.messages.iter().any(|m| m.message_id.as_deref() == Some(message_id))
+        self.messages
+            .iter()
+            .any(|m| m.message_id.as_deref() == Some(message_id))
     }
     /// Update a message's content by message ID
     pub fn update_message_by_id(&mut self, message_id: &str, content: String) -> Option<Message> {
-        if let Some(msg) = self.messages.iter_mut().find(|m| m.message_id.as_deref() == Some(message_id)) {
+        if let Some(msg) = self
+            .messages
+            .iter_mut()
+            .find(|m| m.message_id.as_deref() == Some(message_id))
+        {
             msg.content = content;
             Some(msg.clone())
         } else {
@@ -391,10 +431,10 @@ mod tests {
     #[test]
     fn test_message_history_push() {
         let mut history = MessageHistory::new();
-        
+
         history.push(Message::user("First message"));
         history.push(Message::assistant("Second message"));
-        
+
         assert_eq!(history.len(), 2);
         assert!(!history.is_empty());
     }
@@ -402,12 +442,12 @@ mod tests {
     #[test]
     fn test_message_history_capacity() {
         let mut history = MessageHistory::with_capacity(3);
-        
+
         history.push(Message::user("1"));
         history.push(Message::user("2"));
         history.push(Message::user("3"));
         history.push(Message::user("4"));
-        
+
         // Should only have 3 messages (oldest removed)
         assert_eq!(history.len(), 3);
         assert_eq!(history.get(0).unwrap().content(), "2");
@@ -418,7 +458,7 @@ mod tests {
     #[test]
     fn test_message_history_contains_id() {
         let mut history = MessageHistory::new();
-        
+
         let msg = Message {
             role: MessageRole::Assistant,
             content: "Test".to_string(),
@@ -429,11 +469,10 @@ mod tests {
             streaming: false,
             complete: true,
         };
-        
+
         history.push(msg);
-        
+
         assert!(history.contains_id("msg-123"));
         assert!(!history.contains_id("msg-456"));
     }
 }
-

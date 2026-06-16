@@ -11,7 +11,7 @@
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::similar_names)]
 #![allow(clippy::module_name_repetitions)]
-#![allow(missing_docs)]  // Temporary during active development
+#![allow(missing_docs)] // Temporary during active development
 
 pub mod app;
 pub mod error;

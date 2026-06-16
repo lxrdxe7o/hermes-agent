@@ -7,7 +7,7 @@ use ratatui::{
     layout::Rect,
     style::{Style, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, BorderType, Borders, Padding, Paragraph},
+    widgets::{Block, BorderType, Borders, Padding, Paragraph, Wrap},
     Frame,
 };
 
@@ -71,7 +71,7 @@ impl ToolCardData {
         }
     }
 
-    /// Create tool card data with a specific call_id
+    /// Create tool card data with a specific `call_id`
     pub fn with_call_id(mut self, call_id: impl Into<String>) -> Self {
         self.call_id = call_id.into();
         self
@@ -96,6 +96,7 @@ impl ToolCardData {
     }
 
     /// Set duration in milliseconds
+    #[must_use]
     pub fn with_duration(mut self, duration_ms: u64) -> Self {
         self.duration_ms = Some(duration_ms);
         self
@@ -122,9 +123,13 @@ pub struct CardComponent {
 }
 
 impl CardComponent {
-
     /// Create a new card with the given type, title, and content
-    pub fn new(card_type: CardType, title: impl Into<String>, content: impl Into<String>, colors: ChatColorsRgb) -> Self {
+    pub fn new(
+        card_type: CardType,
+        title: impl Into<String>,
+        content: impl Into<String>,
+        colors: ChatColorsRgb,
+    ) -> Self {
         Self {
             card_type,
             title: title.into(),
@@ -138,31 +143,52 @@ impl CardComponent {
     }
 
     /// Create a new info card
-    pub fn info(title: impl Into<String>, content: impl Into<String>, colors: ChatColorsRgb) -> Self {
+    pub fn info(
+        title: impl Into<String>,
+        content: impl Into<String>,
+        colors: ChatColorsRgb,
+    ) -> Self {
         Self::new(CardType::Info, title, content, colors)
     }
 
     /// Create a new success card
-    pub fn success(title: impl Into<String>, content: impl Into<String>, colors: ChatColorsRgb) -> Self {
+    pub fn success(
+        title: impl Into<String>,
+        content: impl Into<String>,
+        colors: ChatColorsRgb,
+    ) -> Self {
         Self::new(CardType::Success, title, content, colors)
     }
 
     /// Create a new warning card
-    pub fn warning(title: impl Into<String>, content: impl Into<String>, colors: ChatColorsRgb) -> Self {
+    pub fn warning(
+        title: impl Into<String>,
+        content: impl Into<String>,
+        colors: ChatColorsRgb,
+    ) -> Self {
         Self::new(CardType::Warning, title, content, colors)
     }
 
     /// Create a new error card
-    pub fn error(title: impl Into<String>, content: impl Into<String>, colors: ChatColorsRgb) -> Self {
+    pub fn error(
+        title: impl Into<String>,
+        content: impl Into<String>,
+        colors: ChatColorsRgb,
+    ) -> Self {
         Self::new(CardType::Error, title, content, colors)
     }
 
     /// Create a new tool card
-    pub fn tool(title: impl Into<String>, content: impl Into<String>, colors: ChatColorsRgb) -> Self {
+    pub fn tool(
+        title: impl Into<String>,
+        content: impl Into<String>,
+        colors: ChatColorsRgb,
+    ) -> Self {
         Self::new(CardType::Tool, title, content, colors)
     }
 
-    /// Create a new tool card from ToolCardData
+    /// Create a new tool card from `ToolCardData`
+    #[must_use]
     pub fn tool_card(data: &ToolCardData, colors: ChatColorsRgb, spinner_frame: u32) -> Self {
         let title = Self::tool_card_title(data);
         let content = Self::tool_card_content(data, spinner_frame);
@@ -178,7 +204,7 @@ impl CardComponent {
         }
     }
 
-    /// Update this card from ToolCardData (preserves expanded state)
+    /// Update this card from `ToolCardData` (preserves expanded state)
     pub fn update_from_data(&mut self, data: &ToolCardData) {
         self.title = Self::tool_card_title(data);
         self.content = Self::tool_card_content(data, self.spinner_frame);
@@ -195,22 +221,26 @@ impl CardComponent {
         self.spinner_frame = frame;
     }
 
-    /// Get the call_id
+    /// Get the `call_id`
+    #[must_use]
     pub fn call_id(&self) -> &str {
         &self.call_id
     }
 
     /// Get the raw tool name (without status icon decoration)
+    #[must_use]
     pub fn tool_name(&self) -> &str {
         &self.tool_name
     }
 
     /// Check if the card is expanded
+    #[must_use]
     pub fn is_expanded(&self) -> bool {
         self.expanded
     }
 
     /// Update tool card content for a running tool with throbber spinner
+    #[must_use]
     pub fn running_spinner(frame: u32) -> String {
         let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let idx = (frame as usize) % spinner_chars.len();
@@ -224,7 +254,9 @@ impl CardComponent {
             ToolStatus::Failed => " ✗ ",
             ToolStatus::Pending => " ○ ",
         };
-        let duration = data.duration_ms.map_or(String::new(), |ms| format!(" ({:.1}s)", ms as f64 / 1000.0));
+        let duration = data
+            .duration_ms
+            .map_or(String::new(), |ms| format!(" ({:.1}s)", ms as f64 / 1000.0));
         format!("{} {}{}", status_icon, data.tool_name, duration)
     }
 
@@ -234,7 +266,7 @@ impl CardComponent {
         let mut parts = Vec::new();
 
         if let Some(args) = &data.arguments {
-            parts.push(format!("Args: {}", args));
+            parts.push(format!("Args: {args}"));
         }
 
         // For collapsed view, show only a single-line summary
@@ -249,7 +281,7 @@ impl CardComponent {
                     if result.len() > 120 {
                         format!("Result: {}...", &result[..117])
                     } else {
-                        format!("Result: {}", result)
+                        format!("Result: {result}")
                     }
                 } else {
                     "Completed".to_string()
@@ -257,20 +289,19 @@ impl CardComponent {
             }
             ToolStatus::Failed => {
                 if let Some(error) = &data.error {
-                    format!("Error: {}", error)
+                    format!("Error: {error}")
                 } else {
                     "Failed (no error message)".to_string()
                 }
             }
-            ToolStatus::Pending => {
-                "Waiting...".to_string()
-            }
+            ToolStatus::Pending => "Waiting...".to_string(),
         };
         parts.push(result_text);
 
         parts.join("\n")
     }
     /// Get the card type
+    #[must_use]
     pub fn card_type(&self) -> CardType {
         self.card_type
     }
@@ -281,6 +312,7 @@ impl CardComponent {
     }
 
     /// Get the title
+    #[must_use]
     pub fn title(&self) -> &str {
         &self.title
     }
@@ -291,6 +323,7 @@ impl CardComponent {
     }
 
     /// Get the content
+    #[must_use]
     pub fn content(&self) -> &str {
         &self.content
     }
@@ -342,7 +375,7 @@ impl CardComponent {
     pub fn render(&self, frame: &mut Frame, area: Rect) {
         let border_color = self.border_color();
         let is_tool = self.card_type == CardType::Tool;
-        
+
         // Build title with expand/collapse indicator for tool cards
         let title = if is_tool {
             let indicator = if self.expanded { " ▼ " } else { " ▶ " };
@@ -350,7 +383,7 @@ impl CardComponent {
         } else {
             format!(" {} ", self.title)
         };
-        
+
         // Create a block for the card
         let block = Block::default()
             .title(title)
@@ -361,7 +394,7 @@ impl CardComponent {
 
         // Inner area
         let inner_area = block.inner(area);
-        
+
         // Render the block
         frame.render_widget(block, area);
 
@@ -370,28 +403,32 @@ impl CardComponent {
             // Collapsed: show only first line or truncated summary
             let first_line = self.content.lines().next().unwrap_or(&self.content);
             if first_line.len() > area.width as usize {
-                format!("{}...  (press Enter to expand)", &first_line[..area.width.saturating_sub(25) as usize])
+                format!(
+                    "{}...  (press Enter to expand)",
+                    &first_line[..area.width.saturating_sub(25) as usize]
+                )
             } else {
-                format!("{}  (Enter to expand)", first_line)
+                format!("{first_line}  (Enter to expand)")
             }
         } else {
             self.content.clone()
         };
-        
-        // Create content text
-        let content_text = Text::from(Line::from(Span::styled(
-            &display_content,
-            Style::new().fg(self.text_color()),
-        )));
-        
-        // Create paragraph with content
+
+        // Create content text, handling newlines properly
+        let lines: Vec<Line> = display_content
+            .lines()
+            .map(|l| Line::from(Span::styled(l, Style::new().fg(self.text_color()))))
+            .collect();
+        let content_text = Text::from(lines);
+
+        // Create paragraph with content and wrapping
         let paragraph = Paragraph::new(content_text)
+            .wrap(Wrap { trim: false })
             .style(Style::new().bg(self.bg_color()))
             .block(Block::new().padding(Padding::new(1, 1, 1, 1)));
-        
+
         frame.render_widget(paragraph, inner_area);
     }
-
 }
 
 /// Card manager for handling multiple visible cards
@@ -405,6 +442,7 @@ pub struct CardManager {
 
 impl CardManager {
     /// Create a new card manager
+    #[must_use]
     pub fn new(colors: ChatColorsRgb) -> Self {
         Self {
             cards: Vec::new(),
@@ -413,6 +451,7 @@ impl CardManager {
     }
 
     /// Create a new card manager with defaults
+    #[must_use]
     pub fn with_defaults() -> Self {
         Self::new(ChatColorsRgb {
             user_bg: ratatui::style::Color::Indexed(238),
@@ -450,16 +489,19 @@ impl CardManager {
     }
 
     /// Get the number of cards
+    #[must_use]
     pub fn len(&self) -> usize {
         self.cards.len()
     }
 
     /// Check if there are any cards
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.cards.is_empty()
     }
 
     /// Get all cards
+    #[must_use]
     pub fn cards(&self) -> &[CardComponent] {
         &self.cards
     }
@@ -489,13 +531,13 @@ impl CardManager {
         self.add_card(CardComponent::tool(title, content, self.colors));
     }
 
-    /// Add a tool card from ToolCardData
+    /// Add a tool card from `ToolCardData`
     pub fn add_tool_card(&mut self, data: ToolCardData) {
         // Use 0 as initial frame; the tick_spinners loop will advance it
         self.add_card(CardComponent::tool_card(&data, self.colors, 0));
     }
 
-    /// Update the status of an existing tool card by call_id
+    /// Update the status of an existing tool card by `call_id`
     pub fn update_tool_status(
         &mut self,
         call_id: &str,
@@ -520,17 +562,18 @@ impl CardManager {
         }
     }
 
-    /// Find a card by call_id
+    /// Find a card by `call_id`
+    #[must_use]
     pub fn find_by_call_id(&self, call_id: &str) -> Option<&CardComponent> {
         self.cards.iter().find(|c| c.call_id() == call_id)
     }
 
-    /// Find a card by call_id (mutable)
+    /// Find a card by `call_id` (mutable)
     pub fn find_by_call_id_mut(&mut self, call_id: &str) -> Option<&mut CardComponent> {
         self.cards.iter_mut().find(|c| c.call_id() == call_id)
     }
 
-    /// Update a tool card by call_id with new data
+    /// Update a tool card by `call_id` with new data
     pub fn update_by_call_id(&mut self, call_id: &str, data: &ToolCardData) -> bool {
         if let Some(card) = self.find_by_call_id_mut(call_id) {
             card.update_from_data(data);
@@ -540,7 +583,7 @@ impl CardManager {
         }
     }
 
-    /// Toggle expansion of a tool card by call_id
+    /// Toggle expansion of a tool card by `call_id`
     pub fn toggle_expanded(&mut self, call_id: &str) -> bool {
         if let Some(card) = self.find_by_call_id_mut(call_id) {
             card.toggle_expanded();
@@ -580,7 +623,7 @@ impl CardManager {
 
         // Calculate card heights (each card gets equal height)
         let card_height = area.height / self.cards.len() as u16;
-        
+
         for (i, card) in self.cards.iter().enumerate() {
             let card_area = Rect {
                 x: area.x,
@@ -662,13 +705,13 @@ mod tests {
     fn test_card_setters() {
         let colors = create_test_colors();
         let mut card = CardComponent::new(CardType::Info, "Test", "Content", colors);
-        
+
         card.set_card_type(CardType::Success);
         assert_eq!(card.card_type(), CardType::Success);
-        
+
         card.set_title("New Title");
         assert_eq!(card.title(), "New Title");
-        
+
         card.set_content("New Content");
         assert_eq!(card.content(), "New Content");
     }
@@ -684,10 +727,10 @@ mod tests {
     fn test_card_manager_add() {
         let colors = create_test_colors();
         let mut manager = CardManager::new(colors);
-        
+
         manager.add_info("Info", "Content");
         assert_eq!(manager.len(), 1);
-        
+
         manager.add_success("Success", "Content");
         assert_eq!(manager.len(), 2);
     }
@@ -696,10 +739,10 @@ mod tests {
     fn test_card_manager_remove() {
         let colors = create_test_colors();
         let mut manager = CardManager::new(colors);
-        
+
         manager.add_info("Info", "Content");
         manager.add_success("Success", "Content");
-        
+
         let removed = manager.remove_card(0);
         assert!(removed.is_some());
         assert_eq!(manager.len(), 1);
@@ -709,10 +752,10 @@ mod tests {
     fn test_card_manager_clear() {
         let colors = create_test_colors();
         let mut manager = CardManager::new(colors);
-        
+
         manager.add_info("Info", "Content");
         manager.add_success("Success", "Content");
-        
+
         assert_eq!(manager.len(), 2);
         manager.clear();
         assert!(manager.is_empty());

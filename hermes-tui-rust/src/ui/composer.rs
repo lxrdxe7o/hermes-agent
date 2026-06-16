@@ -44,6 +44,7 @@ pub struct InputComposer {
 
 impl InputComposer {
     /// Create a new input composer with the given colors
+    #[must_use]
     pub fn new(colors: ChatColorsRgb) -> Self {
         Self {
             input: String::new(),
@@ -59,6 +60,7 @@ impl InputComposer {
     }
 
     /// Create a new input composer with all defaults
+    #[must_use]
     pub fn with_defaults() -> Self {
         Self::new(ChatColorsRgb {
             user_bg: ratatui::style::Color::Indexed(238),
@@ -169,8 +171,26 @@ impl InputComposer {
     }
 
     /// Get the current input text
+    #[must_use]
     pub fn get_input(&self) -> &str {
         &self.input
+    }
+
+    /// Get the current cursor position (character index)
+    #[must_use]
+    pub fn cursor_pos(&self) -> usize {
+        self.cursor_pos
+    }
+
+    /// Get the current input and cursor position
+    #[must_use]
+    pub fn input_and_cursor(&self) -> (&str, usize) {
+        (&self.input, self.cursor_pos)
+    }
+
+    /// Set the cursor position (character index)
+    pub fn set_cursor_pos(&mut self, pos: usize) {
+        self.cursor_pos = pos.min(self.input.len());
     }
 
     /// Set the input text
@@ -260,11 +280,13 @@ impl InputComposer {
     }
 
     /// Check if active
+    #[must_use]
     pub fn is_active(&self) -> bool {
         self.active
     }
 
     /// Get input mode
+    #[must_use]
     pub fn input_mode(&self) -> InputMode {
         self.input_mode
     }
@@ -275,11 +297,13 @@ impl InputComposer {
     }
 
     /// Get colors
+    #[must_use]
     pub fn colors(&self) -> &ChatColorsRgb {
         &self.colors
     }
 
     /// Get the history
+    #[must_use]
     pub fn history(&self) -> &[String] {
         &self.history
     }
@@ -291,9 +315,9 @@ impl InputComposer {
         self.saved_input.clear();
     }
 
-
     /// Calculate the required height in terminal rows for the current input.
     /// Returns at least 1, and at most a configurable max height (default 8).
+    #[must_use]
     pub fn required_height(&self, max_height: u16) -> u16 {
         if self.input.is_empty() {
             // Welcome message + input line + some padding
@@ -322,8 +346,11 @@ impl InputComposer {
         }
 
         // Prompt and input
-        let prompt_span = Span::styled(&self.prompt, Style::new().fg(Color::Rgb(248, 248, 242)).bold());
-        
+        let prompt_span = Span::styled(
+            &self.prompt,
+            Style::new().fg(Color::Rgb(248, 248, 242)).bold(),
+        );
+
         let input_line = if self.input.is_empty() {
             Line::from(vec![prompt_span])
         } else {
@@ -334,8 +361,8 @@ impl InputComposer {
         lines.push(input_line);
 
         let line_count = lines.len();
-        let paragraph = Paragraph::new(Text::from(lines))
-            .wrap(ratatui::widgets::Wrap { trim: false });
+        let paragraph =
+            Paragraph::new(Text::from(lines)).wrap(ratatui::widgets::Wrap { trim: false });
 
         frame.render_widget(paragraph, area);
 
@@ -370,7 +397,10 @@ impl InputComposer {
 
         // Build display text
         let mut lines = Vec::new();
-        let prompt_span = Span::styled(&self.prompt, Style::new().fg(Color::Rgb(102, 217, 239)).bold()); // #66D9EF Cyan
+        let prompt_span = Span::styled(
+            &self.prompt,
+            Style::new().fg(Color::Rgb(102, 217, 239)).bold(),
+        ); // #66D9EF Cyan
 
         if self.input.is_empty() {
             // Show placeholder
@@ -381,7 +411,10 @@ impl InputComposer {
             };
             lines.push(Line::from(vec![
                 prompt_span,
-                Span::styled(placeholder, Style::new().fg(Color::Rgb(117, 113, 94)).italic()), // #75715E Gray
+                Span::styled(
+                    placeholder,
+                    Style::new().fg(Color::Rgb(117, 113, 94)).italic(),
+                ), // #75715E Gray
             ]));
         } else {
             // Split input into lines and prepend prompt to first line
@@ -412,48 +445,54 @@ impl InputComposer {
         if self.active {
             let prompt_len = self.prompt.chars().count() as u16;
             let inner_width = inner_area.width;
-            
+
             // Find which logical line the cursor is in
             let input_before = &self.input[..self.cursor_pos.min(self.input.len())];
             let current_logical_line_idx = input_before.matches('\n').count();
             let input_lines: Vec<&str> = self.input.lines().collect();
-            
+
             let mut cursor_y = inner_area.y;
-            
+
             // Add visual lines for all logical lines before the current one
             for i in 0..current_logical_line_idx {
                 let line_text = input_lines.get(i).copied().unwrap_or("");
                 let line_len = line_text.chars().count() as u16;
                 let first_line_width = inner_width.saturating_sub(prompt_len);
-                
+
                 if first_line_width > 0 && line_len > first_line_width {
                     let remaining = line_len - first_line_width;
-                    cursor_y += 1 + (remaining + inner_width - 1).checked_div(inner_width).unwrap_or(0);
+                    cursor_y += 1
+                        + (remaining + inner_width - 1)
+                            .checked_div(inner_width)
+                            .unwrap_or(0);
                 } else {
                     cursor_y += 1;
                 }
             }
-            
+
             // Now calculate position within the current logical line
-            let line_start = input_before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+            let line_start = input_before.rfind('\n').map_or(0, |i| i + 1);
             let col_in_line = (self.cursor_pos - line_start) as u16;
             let first_line_width = inner_width.saturating_sub(prompt_len);
-            
-            let (wrapped_extra, final_col) = if first_line_width > 0 && col_in_line >= first_line_width {
-                let remaining = col_in_line - first_line_width;
-                if inner_width > 0 {
-                    (1 + remaining / inner_width, remaining % inner_width)
+
+            let (wrapped_extra, final_col) =
+                if first_line_width > 0 && col_in_line >= first_line_width {
+                    let remaining = col_in_line - first_line_width;
+                    if inner_width > 0 {
+                        (1 + remaining / inner_width, remaining % inner_width)
+                    } else {
+                        (1, 0)
+                    }
                 } else {
-                    (1, 0)
-                }
-            } else {
-                (0, prompt_len + col_in_line)
-            };
-            
+                    (0, prompt_len + col_in_line)
+                };
+
             cursor_y += wrapped_extra;
             let cursor_x = inner_area.x + final_col;
 
-            if cursor_x < inner_area.x + inner_area.width && cursor_y < inner_area.y + inner_area.height {
+            if cursor_x < inner_area.x + inner_area.width
+                && cursor_y < inner_area.y + inner_area.height
+            {
                 frame.set_cursor_position(Position::new(cursor_x, cursor_y));
             }
         }
@@ -495,7 +534,7 @@ mod tests {
     fn test_composer_set_input() {
         let colors = create_test_colors();
         let mut composer = InputComposer::new(colors);
-        
+
         composer.set_input("Hello, world!");
         assert_eq!(composer.get_input(), "Hello, world!");
         assert_eq!(composer.cursor_pos, 13);
@@ -505,10 +544,10 @@ mod tests {
     fn test_composer_clear() {
         let colors = create_test_colors();
         let mut composer = InputComposer::new(colors);
-        
+
         composer.set_input("Test");
         assert_eq!(composer.get_input(), "Test");
-        
+
         composer.clear();
         assert!(composer.get_input().is_empty());
         assert_eq!(composer.cursor_pos, 0);
@@ -518,7 +557,7 @@ mod tests {
     fn test_composer_handle_char() {
         let colors = create_test_colors();
         let mut composer = InputComposer::new(colors);
-        
+
         let key = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
         assert!(composer.handle_key_event(key));
         assert_eq!(composer.get_input(), "a");
@@ -529,11 +568,11 @@ mod tests {
     fn test_composer_handle_backspace() {
         let colors = create_test_colors();
         let mut composer = InputComposer::new(colors);
-        
+
         composer.set_input("Hello");
         // After set_input, cursor is at position 5 (after 'o')
         assert_eq!(composer.cursor_pos, 5);
-        
+
         let key = KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE);
         assert!(composer.handle_key_event(key));
         assert_eq!(composer.get_input(), "Hell");
@@ -545,7 +584,7 @@ mod tests {
     fn test_composer_handle_enter() {
         let colors = create_test_colors();
         let mut composer = InputComposer::new(colors);
-        
+
         composer.set_input("Hello");
         let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         assert!(composer.handle_key_event(key));
@@ -557,24 +596,24 @@ mod tests {
     fn test_composer_cursor_movement() {
         let colors = create_test_colors();
         let mut composer = InputComposer::new(colors);
-        
+
         composer.set_input("Hello");
-        
+
         // Move to start
         let key = KeyEvent::new(KeyCode::Home, KeyModifiers::NONE);
         assert!(composer.handle_key_event(key));
         assert_eq!(composer.cursor_pos, 0);
-        
+
         // Move to end
         let key = KeyEvent::new(KeyCode::End, KeyModifiers::NONE);
         assert!(composer.handle_key_event(key));
         assert_eq!(composer.cursor_pos, 5);
-        
+
         // Move left
         let key = KeyEvent::new(KeyCode::Left, KeyModifiers::NONE);
         assert!(composer.handle_key_event(key));
         assert_eq!(composer.cursor_pos, 4);
-        
+
         // Move right
         let key = KeyEvent::new(KeyCode::Right, KeyModifiers::NONE);
         assert!(composer.handle_key_event(key));
@@ -585,24 +624,24 @@ mod tests {
     fn test_composer_history() {
         let colors = create_test_colors();
         let mut composer = InputComposer::new(colors);
-        
+
         composer.add_to_history("first".to_string());
         composer.add_to_history("second".to_string());
-        
+
         assert_eq!(composer.history().len(), 2);
-        
+
         // Navigate to previous - loads "second" (most recent)
         composer.history_previous();
         assert_eq!(composer.get_input(), "second");
-        
+
         // Navigate to previous again - loads "first" (older)
         composer.history_previous();
         assert_eq!(composer.get_input(), "first");
-        
+
         // Navigate to next - goes back to "second"
         composer.history_next();
         assert_eq!(composer.get_input(), "second");
-        
+
         // Navigate to next again - restores saved input (empty)
         composer.history_next();
         assert!(composer.get_input().is_empty());
@@ -612,12 +651,12 @@ mod tests {
     fn test_composer_input_mode() {
         let colors = create_test_colors();
         let mut composer = InputComposer::new(colors);
-        
+
         assert_eq!(composer.input_mode(), InputMode::Normal);
-        
+
         composer.set_input_mode(InputMode::Insert);
         assert_eq!(composer.input_mode(), InputMode::Insert);
-        
+
         composer.set_input_mode(InputMode::Command);
         assert_eq!(composer.input_mode(), InputMode::Command);
     }
@@ -633,12 +672,12 @@ mod tests {
     fn test_composer_active_state() {
         let colors = create_test_colors();
         let mut composer = InputComposer::new(colors);
-        
+
         assert!(composer.is_active());
-        
+
         composer.set_active(false);
         assert!(!composer.is_active());
-        
+
         composer.set_active(true);
         assert!(composer.is_active());
     }

@@ -32,6 +32,7 @@ pub enum AnsiColor {
 
 impl AnsiColor {
     /// Parse an ANSI color code from a string
+    #[must_use]
     pub fn from_code(code: u8) -> Option<Self> {
         match code {
             30 => Some(Self::Black),
@@ -55,6 +56,7 @@ impl AnsiColor {
     }
 
     /// Get the ANSI escape code for this color (foreground)
+    #[must_use]
     pub fn to_fg_code(&self) -> String {
         match self {
             Self::Black => "30".to_string(),
@@ -73,13 +75,14 @@ impl AnsiColor {
             Self::BrightMagenta => "95".to_string(),
             Self::BrightCyan => "96".to_string(),
             Self::BrightWhite => "97".to_string(),
-            Self::Rgb(r, g, b) => format!("38;2;{};{};{}", r, g, b),
-            Self::Indexed(i) => format!("38;5;{}", i),
+            Self::Rgb(r, g, b) => format!("38;2;{r};{g};{b}"),
+            Self::Indexed(i) => format!("38;5;{i}"),
             Self::Default => "39".to_string(),
         }
     }
 
     /// Get the ANSI escape code for this color (background)
+    #[must_use]
     pub fn to_bg_code(&self) -> String {
         match self {
             Self::Black => "40".to_string(),
@@ -98,13 +101,14 @@ impl AnsiColor {
             Self::BrightMagenta => "105".to_string(),
             Self::BrightCyan => "106".to_string(),
             Self::BrightWhite => "107".to_string(),
-            Self::Rgb(r, g, b) => format!("48;2;{};{};{}", r, g, b),
-            Self::Indexed(i) => format!("48;5;{}", i),
+            Self::Rgb(r, g, b) => format!("48;2;{r};{g};{b}"),
+            Self::Indexed(i) => format!("48;5;{i}"),
             Self::Default => "49".to_string(),
         }
     }
 
     /// Convert to ratatui Color
+    #[must_use]
     pub fn to_ratatui_color(&self) -> Color {
         match self {
             Self::Black => Color::Black,
@@ -173,83 +177,111 @@ pub struct AnsiStyle {
 
 impl AnsiStyle {
     /// Create a new empty style
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Set foreground color
+    #[must_use]
     pub fn fg(mut self, color: AnsiColor) -> Self {
         self.foreground = Some(color);
         self
     }
 
     /// Set background color
+    #[must_use]
     pub fn bg(mut self, color: AnsiColor) -> Self {
         self.background = Some(color);
         self
     }
 
     /// Set bold
+    #[must_use]
     pub fn bold(mut self) -> Self {
         self.bold = true;
         self
     }
 
     /// Set dim
+    #[must_use]
     pub fn dim(mut self) -> Self {
         self.dim = true;
         self
     }
 
     /// Set italic
+    #[must_use]
     pub fn italic(mut self) -> Self {
         self.italic = true;
         self
     }
 
     /// Set underline
+    #[must_use]
     pub fn underline(mut self) -> Self {
         self.underline = true;
         self
     }
 
     /// Set blink
+    #[must_use]
     pub fn blink(mut self) -> Self {
         self.blink = true;
         self
     }
 
     /// Set reverse
+    #[must_use]
     pub fn reverse(mut self) -> Self {
         self.reverse = true;
         self
     }
 
     /// Set hidden
+    #[must_use]
     pub fn hidden(mut self) -> Self {
         self.hidden = true;
         self
     }
 
     /// Set strikethrough
+    #[must_use]
     pub fn strikethrough(mut self) -> Self {
         self.strikethrough = true;
         self
     }
 
     /// Get the ANSI escape code for this style
+    #[must_use]
     pub fn to_ansi(&self) -> String {
         let mut codes: Vec<String> = Vec::new();
 
         // Text attributes
-        if self.bold { codes.push("1".to_string()); }
-        if self.dim { codes.push("2".to_string()); }
-        if self.italic { codes.push("3".to_string()); }
-        if self.underline { codes.push("4".to_string()); }
-        if self.blink { codes.push("5".to_string()); }
-        if self.reverse { codes.push("7".to_string()); }
-        if self.hidden { codes.push("8".to_string()); }
-        if self.strikethrough { codes.push("9".to_string()); }
+        if self.bold {
+            codes.push("1".to_string());
+        }
+        if self.dim {
+            codes.push("2".to_string());
+        }
+        if self.italic {
+            codes.push("3".to_string());
+        }
+        if self.underline {
+            codes.push("4".to_string());
+        }
+        if self.blink {
+            codes.push("5".to_string());
+        }
+        if self.reverse {
+            codes.push("7".to_string());
+        }
+        if self.hidden {
+            codes.push("8".to_string());
+        }
+        if self.strikethrough {
+            codes.push("9".to_string());
+        }
 
         // Foreground color
         if let Some(fg) = &self.foreground {
@@ -269,11 +301,13 @@ impl AnsiStyle {
     }
 
     /// Get the ANSI reset code
+    #[must_use]
     pub fn reset() -> String {
         "\x1b[0m".to_string()
     }
 
     /// Convert to ratatui Style
+    #[must_use]
     pub fn to_ratatui_style(&self) -> ratatui::style::Style {
         let mut style = ratatui::style::Style::new();
 
@@ -325,6 +359,7 @@ pub struct AnsiParser {
 
 impl AnsiParser {
     /// Create a new ANSI parser
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -376,7 +411,7 @@ impl AnsiParser {
             while self.position < bytes.len() {
                 let c = bytes[self.position];
                 self.position += 1;
-                if c >= b'@' && c <= b'~' {
+                if (b'@'..=b'~').contains(&c) {
                     break;
                 }
             }
@@ -396,7 +431,7 @@ impl AnsiParser {
             match c {
                 b'0'..=b'9' => {
                     in_param = true;
-                    current_param = current_param * 10 + (c - b'0') as u32;
+                    current_param = current_param * 10 + u32::from(c - b'0');
                 }
                 b';' => {
                     if in_param {
@@ -589,6 +624,7 @@ impl AnsiParser {
     }
 
     /// Strip all ANSI escape codes from text
+    #[must_use]
     pub fn strip_ansi(text: &str) -> String {
         let mut result = String::new();
         let bytes = text.as_bytes();
@@ -604,7 +640,7 @@ impl AnsiParser {
                     while i < bytes.len() {
                         let c = bytes[i];
                         i += 1;
-                        if c >= b'@' && c <= b'~' {
+                        if (b'@'..=b'~').contains(&c) {
                             break;
                         }
                     }
@@ -622,23 +658,27 @@ impl AnsiParser {
     }
 
     /// Check if text contains ANSI escape codes
+    #[must_use]
     pub fn has_ansi(text: &str) -> bool {
         text.contains('\x1b')
     }
 
     /// Get the visible width of text (excluding ANSI codes)
+    #[must_use]
     pub fn visible_width(text: &str) -> usize {
         use unicode_width::UnicodeWidthStr;
         Self::strip_ansi(text).width()
     }
 
     /// Get the visible length of text (excluding ANSI codes)
+    #[must_use]
     pub fn visible_length(text: &str) -> usize {
         Self::strip_ansi(text).chars().count()
     }
 }
 
 /// Convert ratatui Text to plain text with ANSI codes
+#[must_use]
 pub fn text_to_ansi(text: &Text) -> String {
     let mut result = String::new();
 
@@ -659,25 +699,53 @@ pub fn text_to_ansi(text: &Text) -> String {
                 }
             }
 
-            if span.style.add_modifier.contains(ratatui::style::Modifier::BOLD) {
+            if span
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD)
+            {
                 style.bold = true;
             }
-            if span.style.add_modifier.contains(ratatui::style::Modifier::DIM) {
+            if span
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::DIM)
+            {
                 style.dim = true;
             }
-            if span.style.add_modifier.contains(ratatui::style::Modifier::ITALIC) {
+            if span
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::ITALIC)
+            {
                 style.italic = true;
             }
-            if span.style.add_modifier.contains(ratatui::style::Modifier::UNDERLINED) {
+            if span
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::UNDERLINED)
+            {
                 style.underline = true;
             }
-            if span.style.add_modifier.contains(ratatui::style::Modifier::REVERSED) {
+            if span
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::REVERSED)
+            {
                 style.reverse = true;
             }
-            if span.style.add_modifier.contains(ratatui::style::Modifier::HIDDEN) {
+            if span
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::HIDDEN)
+            {
                 style.hidden = true;
             }
-            if span.style.add_modifier.contains(ratatui::style::Modifier::CROSSED_OUT) {
+            if span
+                .style
+                .add_modifier
+                .contains(ratatui::style::Modifier::CROSSED_OUT)
+            {
                 style.strikethrough = true;
             }
 
@@ -692,6 +760,7 @@ pub fn text_to_ansi(text: &Text) -> String {
 }
 
 /// Convert plain text with ANSI codes to ratatui Text
+#[must_use]
 pub fn ansi_to_text(text: &str) -> Text<'_> {
     let mut parser = AnsiParser::new();
     let parsed = parser.parse(text);
@@ -707,7 +776,7 @@ pub fn ansi_to_text(text: &str) -> Text<'_> {
                     current_line.push(Span::styled(line.to_string(), style.to_ratatui_style()));
                 }
                 if !current_line.is_empty() {
-                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                    lines.push(Line::from(std::mem::take(&mut current_line)));
                 }
             }
         } else {
@@ -746,10 +815,7 @@ mod tests {
 
     #[test]
     fn test_ansi_style_to_ansi() {
-        let style = AnsiStyle::new()
-            .fg(AnsiColor::Red)
-            .bold()
-            .underline();
+        let style = AnsiStyle::new().fg(AnsiColor::Red).bold().underline();
 
         let ansi = style.to_ansi();
         assert!(ansi.contains("31"));
@@ -792,7 +858,12 @@ mod tests {
     fn test_text_to_ansi() {
         let text = Text::from(Line::from(vec![
             Span::styled("Red", ratatui::style::Style::new().fg(Color::Red)),
-            Span::styled(" Bold", ratatui::style::Style::new().fg(Color::Red).add_modifier(ratatui::style::Modifier::BOLD)),
+            Span::styled(
+                " Bold",
+                ratatui::style::Style::new()
+                    .fg(Color::Red)
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            ),
         ]));
 
         let ansi = text_to_ansi(&text);

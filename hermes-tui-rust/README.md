@@ -12,20 +12,15 @@ This project provides a fast, native terminal experience for Hermes Agent users,
 
 ## Features (Planned)
 
-- [ ] Core chat interface with streaming
-- [ ] Tool call/result cards
-- [ ] Hashline edit cards (content-hash anchored)
-- [ ] LSP integration
-- [ ] DAP (Debug Adapter Protocol) integration
-- [ ] Task/subagent management
-- [ ] Session management (create, resume, list, delete, branch, compress)
-- [ ] Slash commands (20+ built-in)
-- [ ] Model picker
-- [ ] Completion system
-- [ ] Theme/skin system
-- [ ] Mouse support
-- [ ] Bracketed paste
-- [ ] Image display (sixel)
+- [x] Core chat interface with streaming and Markdown support
+- [x] View system with multi-tab switching (Dashboard, IDE, Kanban, Chat)
+- [x] Animated Sixel GIF logo support (`bebop.gif`)
+- [x] Gruvbox theme (default) with high-contrast palette
+- [x] Integrated completion system (slash commands and file paths)
+- [x] Categorized model picker with provider-level grouping
+- [x] Enhanced prompt flows for approvals, clarify, and secrets
+- [x] Native mouse support (scrolling) and bracketed paste
+- [x] Improved tool card rendering with automatic text wrapping
 
 ## Architecture
 
@@ -143,11 +138,15 @@ hermes-tui-rust/
 │   ├── app.rs                # Main App struct and event loop
 │   ├── ui/                   # UI components
 │   │   ├── mod.rs            # UI module exports
-│   │   ├── chat.rs           # Chat transcript
-│   │   ├── composer.rs       # Input composer
-│   │   ├── toolbar.rs        # Status bar
-│   │   ├── cards.rs          # Tool/message cards
-│   │   └── prompts.rs        # Approval/clarify/sudo prompts
+│   │   ├── chat.rs           # Chat transcript rendering
+│   │   ├── dashboard.rs      # Main dashboard with animated telemetry
+│   │   ├── ide.rs            # 3-column IDE layout prototype
+│   │   ├── kanban.rs         # Kanban board layout prototype
+│   │   ├── gif.rs            # Sixel-based animated GIF playback
+│   │   ├── composer.rs       # Input composer with history
+│   │   ├── toolbar.rs        # Status bar with animations
+│   │   ├── cards.rs          # Tool/message result cards
+│   │   └── prompts.rs        # Selectable choice overlays
 │   ├── protocol/             # JSON-RPC protocol
 │   │   ├── mod.rs            # Protocol module exports
 │   │   ├── types.rs          # Message types

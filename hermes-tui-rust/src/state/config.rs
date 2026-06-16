@@ -12,8 +12,10 @@ use crate::error::{TuiError, TuiResult};
 /// Serializable color type that can be converted to/from ratatui Color
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
+#[derive(Default)]
 pub enum SerialColor {
     /// Reset to default
+    #[default]
     Default,
     /// Indexed color (0-255)
     Index(u8),
@@ -21,12 +23,6 @@ pub enum SerialColor {
     Rgb { r: u8, g: u8, b: u8 },
     /// Named color
     Named(String),
-}
-
-impl Default for SerialColor {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 impl From<Color> for SerialColor {
@@ -109,14 +105,30 @@ pub struct ThemeColors {
     pub warning: SerialColor,
 }
 
-fn default_background() -> SerialColor { SerialColor::Default }
-fn default_text() -> SerialColor { SerialColor::Default }
-fn default_primary() -> SerialColor { SerialColor::Index(13) }
-fn default_secondary() -> SerialColor { SerialColor::Index(14) }
-fn default_accent() -> SerialColor { SerialColor::Index(11) }
-fn default_error() -> SerialColor { SerialColor::Named("red".to_string()) }
-fn default_success() -> SerialColor { SerialColor::Named("green".to_string()) }
-fn default_warning() -> SerialColor { SerialColor::Named("yellow".to_string()) }
+fn default_background() -> SerialColor {
+    SerialColor::Default
+}
+fn default_text() -> SerialColor {
+    SerialColor::Default
+}
+fn default_primary() -> SerialColor {
+    SerialColor::Index(13)
+}
+fn default_secondary() -> SerialColor {
+    SerialColor::Index(14)
+}
+fn default_accent() -> SerialColor {
+    SerialColor::Index(11)
+}
+fn default_error() -> SerialColor {
+    SerialColor::Named("red".to_string())
+}
+fn default_success() -> SerialColor {
+    SerialColor::Named("green".to_string())
+}
+fn default_warning() -> SerialColor {
+    SerialColor::Named("yellow".to_string())
+}
 
 impl Default for ThemeColors {
     fn default() -> Self {
@@ -135,6 +147,7 @@ impl Default for ThemeColors {
 
 impl ThemeColors {
     /// Convert all colors to ratatui Color for runtime use
+    #[must_use]
     pub fn to_rgb_colors(&self) -> ThemeColorsRgb {
         ThemeColorsRgb {
             background: Color::from(self.background.clone()),
@@ -191,18 +204,42 @@ pub struct ChatColors {
     pub timestamp: SerialColor,
 }
 
-fn default_user_bg() -> SerialColor { SerialColor::Index(238) }
-fn default_user_text() -> SerialColor { SerialColor::Index(252) }
-fn default_assistant_bg() -> SerialColor { SerialColor::Index(236) }
-fn default_assistant_text() -> SerialColor { SerialColor::Index(248) }
-fn default_system_bg() -> SerialColor { SerialColor::Index(235) }
-fn default_system_text() -> SerialColor { SerialColor::Index(245) }
-fn default_tool_bg() -> SerialColor { SerialColor::Index(237) }
-fn default_tool_text() -> SerialColor { SerialColor::Index(243) }
-fn default_code_bg() -> SerialColor { SerialColor::Index(233) }
-fn default_code_text() -> SerialColor { SerialColor::Index(252) }
-fn default_border() -> SerialColor { SerialColor::Index(240) }
-fn default_timestamp() -> SerialColor { SerialColor::Index(246) }
+fn default_user_bg() -> SerialColor {
+    SerialColor::Index(238)
+}
+fn default_user_text() -> SerialColor {
+    SerialColor::Index(252)
+}
+fn default_assistant_bg() -> SerialColor {
+    SerialColor::Index(236)
+}
+fn default_assistant_text() -> SerialColor {
+    SerialColor::Index(248)
+}
+fn default_system_bg() -> SerialColor {
+    SerialColor::Index(235)
+}
+fn default_system_text() -> SerialColor {
+    SerialColor::Index(245)
+}
+fn default_tool_bg() -> SerialColor {
+    SerialColor::Index(237)
+}
+fn default_tool_text() -> SerialColor {
+    SerialColor::Index(243)
+}
+fn default_code_bg() -> SerialColor {
+    SerialColor::Index(233)
+}
+fn default_code_text() -> SerialColor {
+    SerialColor::Index(252)
+}
+fn default_border() -> SerialColor {
+    SerialColor::Index(240)
+}
+fn default_timestamp() -> SerialColor {
+    SerialColor::Index(246)
+}
 
 impl Default for ChatColors {
     fn default() -> Self {
@@ -225,6 +262,7 @@ impl Default for ChatColors {
 
 impl ChatColors {
     /// Convert all colors to ratatui Color for runtime use
+    #[must_use]
     pub fn to_rgb_colors(&self) -> ChatColorsRgb {
         ChatColorsRgb {
             user_bg: Color::from(self.user_bg.clone()),
@@ -280,6 +318,7 @@ impl Default for ThemeConfig {
 
 impl ThemeConfig {
     /// Convert all colors to ratatui Color for runtime use
+    #[must_use]
     pub fn to_rgb_colors(&self) -> ThemeConfigRgb {
         ThemeConfigRgb {
             name: self.name.clone(),
@@ -304,29 +343,41 @@ pub enum BuiltinTheme {
     Dark,
     Light,
     Kraken,
+    Gruvbox,
 }
 
 impl BuiltinTheme {
+    #[must_use]
     pub fn all() -> &'static [Self] {
-        &[Self::Default, Self::Dark, Self::Light, Self::Kraken]
+        &[
+            Self::Default,
+            Self::Dark,
+            Self::Light,
+            Self::Kraken,
+            Self::Gruvbox,
+        ]
     }
 
+    #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
         match name.to_lowercase().as_str() {
             "default" => Some(Self::Default),
             "dark" => Some(Self::Dark),
             "light" => Some(Self::Light),
             "kraken" => Some(Self::Kraken),
+            "gruvbox" => Some(Self::Gruvbox),
             _ => None,
         }
     }
 
+    #[must_use]
     pub fn to_config(&self) -> ThemeConfig {
         match self {
             Self::Default => default_theme(),
             Self::Dark => dark_theme(),
             Self::Light => light_theme(),
             Self::Kraken => kraken_theme(),
+            Self::Gruvbox => gruvbox_theme(),
         }
     }
 }
@@ -394,28 +445,218 @@ fn kraken_theme() -> ThemeConfig {
     ThemeConfig {
         name: "kraken".to_string(),
         colors: ThemeColors {
-            background: SerialColor::Rgb { r: 39, g: 40, b: 34 }, // #272822
-            text: SerialColor::Rgb { r: 248, g: 248, b: 242 },      // #F8F8F2
-            primary: SerialColor::Rgb { r: 174, g: 129, b: 255 },   // #AE81FF (Purple)
-            secondary: SerialColor::Rgb { r: 102, g: 217, b: 239 }, // #66D9EF (Cyan)
-            accent: SerialColor::Rgb { r: 230, g: 219, b: 116 },    // #E6DB74 (Yellow)
-            error: SerialColor::Rgb { r: 249, g: 38, b: 114 },      // #F92672 (Pink)
-            success: SerialColor::Rgb { r: 166, g: 226, b: 46 },    // #A6E22E (Green)
-            warning: SerialColor::Rgb { r: 253, g: 151, b: 31 },    // #FD971F (Orange)
+            background: SerialColor::Rgb {
+                r: 39,
+                g: 40,
+                b: 34,
+            }, // #272822
+            text: SerialColor::Rgb {
+                r: 248,
+                g: 248,
+                b: 242,
+            }, // #F8F8F2
+            primary: SerialColor::Rgb {
+                r: 174,
+                g: 129,
+                b: 255,
+            }, // #AE81FF (Purple)
+            secondary: SerialColor::Rgb {
+                r: 102,
+                g: 217,
+                b: 239,
+            }, // #66D9EF (Cyan)
+            accent: SerialColor::Rgb {
+                r: 230,
+                g: 219,
+                b: 116,
+            }, // #E6DB74 (Yellow)
+            error: SerialColor::Rgb {
+                r: 249,
+                g: 38,
+                b: 114,
+            }, // #F92672 (Pink)
+            success: SerialColor::Rgb {
+                r: 166,
+                g: 226,
+                b: 46,
+            }, // #A6E22E (Green)
+            warning: SerialColor::Rgb {
+                r: 253,
+                g: 151,
+                b: 31,
+            }, // #FD971F (Orange)
         },
         chat: ChatColors {
-            user_bg: SerialColor::Rgb { r: 73, g: 72, b: 62 },      // #49483E
-            user_text: SerialColor::Rgb { r: 248, g: 248, b: 242 },
-            assistant_bg: SerialColor::Rgb { r: 39, g: 40, b: 34 }, // #272822
-            assistant_text: SerialColor::Rgb { r: 248, g: 248, b: 242 },
-            system_bg: SerialColor::Rgb { r: 27, g: 29, b: 30 },    // #1B1D1E
-            system_text: SerialColor::Rgb { r: 117, g: 113, b: 94 }, // #75715E
-            tool_bg: SerialColor::Rgb { r: 39, g: 40, b: 34 },
-            tool_text: SerialColor::Rgb { r: 166, g: 226, b: 46 },
-            code_bg: SerialColor::Rgb { r: 27, g: 29, b: 30 },
-            code_text: SerialColor::Rgb { r: 248, g: 248, b: 242 },
-            border: SerialColor::Rgb { r: 174, g: 129, b: 255 },    // #AE81FF
-            timestamp: SerialColor::Rgb { r: 117, g: 113, b: 94 },
+            user_bg: SerialColor::Rgb {
+                r: 73,
+                g: 72,
+                b: 62,
+            }, // #49483E
+            user_text: SerialColor::Rgb {
+                r: 248,
+                g: 248,
+                b: 242,
+            },
+            assistant_bg: SerialColor::Rgb {
+                r: 39,
+                g: 40,
+                b: 34,
+            }, // #272822
+            assistant_text: SerialColor::Rgb {
+                r: 248,
+                g: 248,
+                b: 242,
+            },
+            system_bg: SerialColor::Rgb {
+                r: 27,
+                g: 29,
+                b: 30,
+            }, // #1B1D1E
+            system_text: SerialColor::Rgb {
+                r: 117,
+                g: 113,
+                b: 94,
+            }, // #75715E
+            tool_bg: SerialColor::Rgb {
+                r: 39,
+                g: 40,
+                b: 34,
+            },
+            tool_text: SerialColor::Rgb {
+                r: 166,
+                g: 226,
+                b: 46,
+            },
+            code_bg: SerialColor::Rgb {
+                r: 27,
+                g: 29,
+                b: 30,
+            },
+            code_text: SerialColor::Rgb {
+                r: 248,
+                g: 248,
+                b: 242,
+            },
+            border: SerialColor::Rgb {
+                r: 174,
+                g: 129,
+                b: 255,
+            }, // #AE81FF
+            timestamp: SerialColor::Rgb {
+                r: 117,
+                g: 113,
+                b: 94,
+            },
+        },
+    }
+}
+
+fn gruvbox_theme() -> ThemeConfig {
+    ThemeConfig {
+        name: "gruvbox".to_string(),
+        colors: ThemeColors {
+            background: SerialColor::Rgb {
+                r: 40,
+                g: 40,
+                b: 40,
+            }, // #282828
+            text: SerialColor::Rgb {
+                r: 235,
+                g: 219,
+                b: 178,
+            }, // #ebdbb2
+            primary: SerialColor::Rgb {
+                r: 211,
+                g: 134,
+                b: 155,
+            }, // #d3869b
+            secondary: SerialColor::Rgb {
+                r: 131,
+                g: 165,
+                b: 152,
+            }, // #83a598
+            accent: SerialColor::Rgb {
+                r: 250,
+                g: 189,
+                b: 47,
+            }, // #fabd2f
+            error: SerialColor::Rgb {
+                r: 204,
+                g: 36,
+                b: 29,
+            }, // #cc241d
+            success: SerialColor::Rgb {
+                r: 184,
+                g: 187,
+                b: 38,
+            }, // #b8bb26
+            warning: SerialColor::Rgb {
+                r: 215,
+                g: 153,
+                b: 33,
+            }, // #d79921
+        },
+        chat: ChatColors {
+            user_bg: SerialColor::Rgb {
+                r: 60,
+                g: 56,
+                b: 54,
+            }, // #3c3836
+            user_text: SerialColor::Rgb {
+                r: 235,
+                g: 219,
+                b: 178,
+            },
+            assistant_bg: SerialColor::Rgb {
+                r: 40,
+                g: 40,
+                b: 40,
+            }, // #282828
+            assistant_text: SerialColor::Rgb {
+                r: 235,
+                g: 219,
+                b: 178,
+            },
+            system_bg: SerialColor::Rgb {
+                r: 27,
+                g: 32,
+                b: 33,
+            }, // #1d2021
+            system_text: SerialColor::Rgb {
+                r: 146,
+                g: 131,
+                b: 116,
+            }, // #928374
+            tool_bg: SerialColor::Rgb {
+                r: 40,
+                g: 40,
+                b: 40,
+            },
+            tool_text: SerialColor::Rgb {
+                r: 142,
+                g: 192,
+                b: 124,
+            }, // #8ec07c
+            code_bg: SerialColor::Rgb {
+                r: 27,
+                g: 32,
+                b: 33,
+            }, // #1d2021
+            code_text: SerialColor::Rgb {
+                r: 235,
+                g: 219,
+                b: 178,
+            },
+            border: SerialColor::Rgb {
+                r: 168,
+                g: 153,
+                b: 132,
+            }, // #a89984
+            timestamp: SerialColor::Rgb {
+                r: 146,
+                g: 131,
+                b: 116,
+            }, // #928374
         },
     }
 }
@@ -428,6 +669,7 @@ pub struct ThemeManager {
 }
 
 impl ThemeManager {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             current_theme: ThemeConfig::default(),
@@ -447,10 +689,11 @@ impl ThemeManager {
             self.current_theme = custom.clone();
             Ok(())
         } else {
-            Err(TuiError::config(format!("Theme '{}' not found", name)))
+            Err(TuiError::config(format!("Theme '{name}' not found")))
         }
     }
 
+    #[must_use]
     pub fn current_theme(&self) -> &ThemeConfig {
         &self.current_theme
     }
@@ -463,12 +706,13 @@ impl ThemeManager {
         self.custom_themes.insert(theme.name.clone(), theme);
     }
 
+    #[must_use]
     pub fn all_theme_names(&self) -> Vec<String> {
         let mut names: Vec<String> = BuiltinTheme::all()
             .iter()
             .map(|t| t.to_config().name.clone())
             .collect();
-        
+
         names.extend(self.custom_themes.keys().cloned());
         names.sort();
         names
@@ -494,9 +738,15 @@ pub struct DisplayConfig {
     pub max_message_width: u16,
 }
 
-fn default_show_timestamps() -> bool { true }
-fn default_show_session_name() -> bool { true }
-fn default_syntax_highlighting() -> bool { true }
+fn default_show_timestamps() -> bool {
+    true
+}
+fn default_show_session_name() -> bool {
+    true
+}
+fn default_syntax_highlighting() -> bool {
+    true
+}
 
 impl Default for DisplayConfig {
     fn default() -> Self {
@@ -520,9 +770,15 @@ pub struct EditorConfig {
     pub history_size: usize,
 }
 
-fn default_auto_indent() -> bool { true }
-fn default_tab_width() -> u8 { 4 }
-fn default_history_size() -> usize { 100 }
+fn default_auto_indent() -> bool {
+    true
+}
+fn default_tab_width() -> u8 {
+    4
+}
+fn default_history_size() -> usize {
+    100
+}
 
 impl Default for EditorConfig {
     fn default() -> Self {
@@ -537,16 +793,12 @@ impl Default for EditorConfig {
 /// Input mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum InputMode {
+    #[default]
     Normal,
     Insert,
     Command,
-}
-
-impl Default for InputMode {
-    fn default() -> Self {
-        Self::Normal
-    }
 }
 
 /// Main TUI configuration
@@ -605,7 +857,7 @@ mod tests {
         let color = Color::from(serial.clone());
         let serial2 = SerialColor::from(color);
         assert_eq!(serial, serial2);
-        
+
         // Test indexed
         let serial = SerialColor::Index(238);
         let color = Color::from(serial.clone());
@@ -623,7 +875,7 @@ mod tests {
     fn test_theme_manager() {
         let mut manager = ThemeManager::new();
         assert_eq!(manager.current_theme().name, "default");
-        
+
         manager.load_builtin(BuiltinTheme::Dark);
         assert_eq!(manager.current_theme().name, "dark");
     }
@@ -643,4 +895,3 @@ mod tests {
         assert_eq!(config, deserialized);
     }
 }
-

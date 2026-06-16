@@ -30,10 +30,10 @@ pub struct HashlineColors {
 impl Default for HashlineColors {
     fn default() -> Self {
         Self {
-            addition_fg: Color::Rgb(0x4a, 0xcb, 0x62),   // green
-            addition_bg: Color::Rgb(0x1b, 0x3a, 0x22),   // dark green
-            deletion_fg: Color::Rgb(0xe5, 0x5c, 0x5c),   // red
-            deletion_bg: Color::Rgb(0x3a, 0x1b, 0x1b),   // dark red
+            addition_fg: Color::Rgb(0x4a, 0xcb, 0x62),    // green
+            addition_bg: Color::Rgb(0x1b, 0x3a, 0x22),    // dark green
+            deletion_fg: Color::Rgb(0xe5, 0x5c, 0x5c),    // red
+            deletion_bg: Color::Rgb(0x3a, 0x1b, 0x1b),    // dark red
             replacement_fg: Color::Rgb(0xe5, 0xc0, 0x5c), // yellow
             context_fg: Color::Rgb(0xaa, 0xaa, 0xaa),     // gray
             path_header_fg: Color::Rgb(0x5c, 0xae, 0xe5), // blue
@@ -60,6 +60,7 @@ impl Default for HashlineViewer {
 
 impl HashlineViewer {
     /// Create a new hashline viewer with default colors
+    #[must_use]
     pub fn new() -> Self {
         Self {
             colors: HashlineColors::default(),
@@ -68,11 +69,16 @@ impl HashlineViewer {
     }
 
     /// Set custom colors
+    #[must_use]
     pub fn with_colors(colors: HashlineColors) -> Self {
-        Self { colors, show_gutter: true }
+        Self {
+            colors,
+            show_gutter: true,
+        }
     }
 
     /// Enable or disable gutter
+    #[must_use]
     pub fn show_gutter(mut self, show: bool) -> Self {
         self.show_gutter = show;
         self
@@ -112,9 +118,9 @@ impl HashlineViewer {
             let mut spans: Vec<Span<'static>> = Vec::new();
 
             if self.show_gutter {
-                let line_str = format!("{:>4}", line_num);
+                let line_str = format!("{line_num:>4}");
                 spans.push(Span::styled(
-                    format!("{}{} ", line_str, gutter_char),
+                    format!("{line_str}{gutter_char} "),
                     Style::default().fg(self.colors.gutter_fg),
                 ));
             }
@@ -165,7 +171,10 @@ fn tokenize_line(line: &str) -> Vec<Token> {
         if c == '"' {
             // Flush non-string buffer
             if !current.is_empty() {
-                tokens.push(Token { text: std::mem::take(&mut current), is_string: false });
+                tokens.push(Token {
+                    text: std::mem::take(&mut current),
+                    is_string: false,
+                });
             }
             // Start of string
             current.push('"');
@@ -175,14 +184,20 @@ fn tokenize_line(line: &str) -> Vec<Token> {
                     break;
                 }
             }
-            tokens.push(Token { text: std::mem::take(&mut current), is_string: true });
+            tokens.push(Token {
+                text: std::mem::take(&mut current),
+                is_string: true,
+            });
         } else {
             current.push(c);
         }
     }
 
     if !current.is_empty() {
-        tokens.push(Token { text: current, is_string: false });
+        tokens.push(Token {
+            text: current,
+            is_string: false,
+        });
     }
 
     tokens
@@ -213,8 +228,18 @@ mod tests {
         let block = HashlineEditBlock {
             path: "test.rs".to_string(),
             edits: vec![
-                HashlineEdit { edit_type: HashlineEditType::Addition, content: "fn main() {".to_string(), line_number: None, path: None },
-                HashlineEdit { edit_type: HashlineEditType::Context, content: "}".to_string(), line_number: None, path: None },
+                HashlineEdit {
+                    edit_type: HashlineEditType::Addition,
+                    content: "fn main() {".to_string(),
+                    line_number: None,
+                    path: None,
+                },
+                HashlineEdit {
+                    edit_type: HashlineEditType::Context,
+                    content: "}".to_string(),
+                    line_number: None,
+                    path: None,
+                },
             ],
             start_line: 1,
             end_line: 2,

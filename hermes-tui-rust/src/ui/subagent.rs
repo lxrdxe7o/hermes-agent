@@ -74,6 +74,7 @@ impl SubagentInfo {
     }
 
     /// Get the status icon and color
+    #[must_use]
     pub fn status_style(&self) -> (&'static str, Style) {
         match self.status {
             SubagentStatus::Running => (" ▶ ", Style::default().fg(Color::Yellow).bold()),
@@ -106,6 +107,7 @@ impl Default for SubagentList {
 
 impl SubagentList {
     /// Create a new subagent list
+    #[must_use]
     pub fn new() -> Self {
         Self {
             agents: Vec::new(),
@@ -139,28 +141,39 @@ impl SubagentList {
     }
 
     /// Get active (running + pending) subagent count
+    #[must_use]
     pub fn active_count(&self) -> usize {
-        self.agents.iter()
+        self.agents
+            .iter()
             .filter(|a| a.status == SubagentStatus::Running || a.status == SubagentStatus::Pending)
             .count()
     }
 
     /// Get total subagent count
+    #[must_use]
     pub fn total_count(&self) -> usize {
         self.agents.len()
     }
 
     /// Check if there are any subagents
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.agents.is_empty()
     }
 
     /// Scroll to the latest active subagent
     pub fn scroll_to_latest(&mut self) {
-        if let Some(idx) = self.agents.iter().rposition(|a| a.status == SubagentStatus::Running) {
+        if let Some(idx) = self
+            .agents
+            .iter()
+            .rposition(|a| a.status == SubagentStatus::Running)
+        {
             self.scroll = idx.saturating_sub(self.visible_height.saturating_sub(1) as usize) as u16;
         } else if !self.agents.is_empty() {
-            self.scroll = self.agents.len().saturating_sub(self.visible_height as usize) as u16;
+            self.scroll = self
+                .agents
+                .len()
+                .saturating_sub(self.visible_height as usize) as u16;
         }
     }
 
@@ -172,7 +185,10 @@ impl SubagentList {
 
     /// Scroll down
     pub fn scroll_down(&mut self) {
-        let max_scroll = self.agents.len().saturating_sub(self.visible_height as usize);
+        let max_scroll = self
+            .agents
+            .len()
+            .saturating_sub(self.visible_height as usize);
         self.scroll = (self.scroll + 1).min(max_scroll as u16);
         self.auto_scroll = false;
     }
@@ -205,7 +221,12 @@ impl SubagentList {
         let end = (start + inner.height as usize).min(self.agents.len());
 
         let mut y_offset = 0u16;
-        for agent in self.agents.iter().skip(start).take(end.saturating_sub(start)) {
+        for agent in self
+            .agents
+            .iter()
+            .skip(start)
+            .take(end.saturating_sub(start))
+        {
             if y_offset >= inner.height {
                 break;
             }
@@ -230,10 +251,7 @@ impl SubagentList {
         }
 
         // Agent ID
-        spans.push(Span::styled(
-            agent.id.clone(),
-            Style::default().bold(),
-        ));
+        spans.push(Span::styled(agent.id.clone(), Style::default().bold()));
 
         // Goal (truncated)
         let max_goal_len = 40usize;
@@ -250,7 +268,7 @@ impl SubagentList {
             let s = if summary.len() > max_summary_len {
                 format!(" → {}...", &summary[..max_summary_len.saturating_sub(3)])
             } else {
-                format!(" → {}", summary)
+                format!(" → {summary}")
             };
             spans.push(Span::styled(s, Style::default().fg(Color::DarkGray)));
         }
@@ -264,6 +282,7 @@ impl SubagentList {
     }
 
     /// Get immutable access to the agent list
+    #[must_use]
     pub fn agents(&self) -> &[SubagentInfo] {
         &self.agents
     }

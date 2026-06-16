@@ -67,31 +67,71 @@ impl Default for KeyBindings {
 }
 
 impl KeyBindings {
+    #[must_use]
     pub fn matches_any(&self, key: &KeyEvent, bindings: &[KeyEvent]) -> bool {
-        bindings.iter().any(|binding| self.key_matches(key, binding))
+        bindings
+            .iter()
+            .any(|binding| self.key_matches(key, binding))
     }
 
+    #[must_use]
     pub fn key_matches(&self, a: &KeyEvent, b: &KeyEvent) -> bool {
         a.code == b.code && a.modifiers == b.modifiers
     }
 
-    pub fn is_quit(&self, key: &KeyEvent) -> bool { self.matches_any(key, &self.quit) }
-    pub fn is_submit(&self, key: &KeyEvent) -> bool { self.matches_any(key, &self.submit) }
-    pub fn is_command_mode(&self, key: &KeyEvent) -> bool { self.matches_any(key, &self.command_mode) }
-    pub fn is_exit_command_mode(&self, key: &KeyEvent) -> bool { self.matches_any(key, &self.exit_command_mode) }
-    pub fn is_history_up(&self, key: &KeyEvent) -> bool { self.matches_any(key, &self.history_up) }
-    pub fn is_history_down(&self, key: &KeyEvent) -> bool { self.matches_any(key, &self.history_down) }
-    pub fn is_new_session(&self, key: &KeyEvent) -> bool { self.matches_any(key, &self.new_session) }
-    pub fn is_resume_session(&self, key: &KeyEvent) -> bool { self.matches_any(key, &self.resume_session) }
-    pub fn is_list_sessions(&self, key: &KeyEvent) -> bool { self.matches_any(key, &self.list_sessions) }
-    pub fn is_scroll_up(&self, key: &KeyEvent) -> bool { self.matches_any(key, &self.scroll_up) }
-    pub fn is_scroll_down(&self, key: &KeyEvent) -> bool { self.matches_any(key, &self.scroll_down) }
+    #[must_use]
+    pub fn is_quit(&self, key: &KeyEvent) -> bool {
+        self.matches_any(key, &self.quit)
+    }
+    #[must_use]
+    pub fn is_submit(&self, key: &KeyEvent) -> bool {
+        self.matches_any(key, &self.submit)
+    }
+    #[must_use]
+    pub fn is_command_mode(&self, key: &KeyEvent) -> bool {
+        self.matches_any(key, &self.command_mode)
+    }
+    #[must_use]
+    pub fn is_exit_command_mode(&self, key: &KeyEvent) -> bool {
+        self.matches_any(key, &self.exit_command_mode)
+    }
+    #[must_use]
+    pub fn is_history_up(&self, key: &KeyEvent) -> bool {
+        self.matches_any(key, &self.history_up)
+    }
+    #[must_use]
+    pub fn is_history_down(&self, key: &KeyEvent) -> bool {
+        self.matches_any(key, &self.history_down)
+    }
+    #[must_use]
+    pub fn is_new_session(&self, key: &KeyEvent) -> bool {
+        self.matches_any(key, &self.new_session)
+    }
+    #[must_use]
+    pub fn is_resume_session(&self, key: &KeyEvent) -> bool {
+        self.matches_any(key, &self.resume_session)
+    }
+    #[must_use]
+    pub fn is_list_sessions(&self, key: &KeyEvent) -> bool {
+        self.matches_any(key, &self.list_sessions)
+    }
+    #[must_use]
+    pub fn is_scroll_up(&self, key: &KeyEvent) -> bool {
+        self.matches_any(key, &self.scroll_up)
+    }
+    #[must_use]
+    pub fn is_scroll_down(&self, key: &KeyEvent) -> bool {
+        self.matches_any(key, &self.scroll_down)
+    }
 }
 
 /// Mouse button enum without crossterm dependency conflicts
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseButton {
-    Left, Right, Middle, Unknown,
+    Left,
+    Right,
+    Middle,
+    Unknown,
 }
 
 impl From<crossterm::event::MouseButton> for MouseButton {
@@ -107,7 +147,12 @@ impl From<crossterm::event::MouseButton> for MouseButton {
 /// Our own mouse event kind (different name from crossterm to avoid conflict)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseKind {
-    Down, Up, Drag, Moved, Scroll, Unknown,
+    Down,
+    Up,
+    Drag,
+    Moved,
+    Scroll,
+    Unknown,
 }
 
 impl From<crossterm::event::MouseEventKind> for MouseKind {
@@ -153,10 +198,17 @@ pub struct InputProcessor {
 /// Action to take based on input event
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputAction {
-    Quit, Submit, EnterCommandMode, ExitCommandMode,
-    HistoryUp, HistoryDown,
-    NewSession, ResumeSession, ListSessions,
-    ScrollUp, ScrollDown,
+    Quit,
+    Submit,
+    EnterCommandMode,
+    ExitCommandMode,
+    HistoryUp,
+    HistoryDown,
+    NewSession,
+    ResumeSession,
+    ListSessions,
+    ScrollUp,
+    ScrollDown,
     PassThrough(KeyEvent),
     None,
 }
@@ -173,24 +225,56 @@ pub enum MouseAction {
 }
 
 impl InputProcessor {
-    pub fn new() -> Self { Self::default() }
-    pub fn with_bindings(bindings: KeyBindings) -> Self { Self { key_bindings: bindings } }
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+    #[must_use]
+    pub fn with_bindings(bindings: KeyBindings) -> Self {
+        Self {
+            key_bindings: bindings,
+        }
+    }
 
+    #[must_use]
     pub fn process_key(&self, key: KeyEvent) -> InputAction {
-        if self.key_bindings.is_quit(&key) { return InputAction::Quit; }
-        if self.key_bindings.is_submit(&key) { return InputAction::Submit; }
-        if self.key_bindings.is_command_mode(&key) { return InputAction::EnterCommandMode; }
-        if self.key_bindings.is_exit_command_mode(&key) { return InputAction::ExitCommandMode; }
-        if self.key_bindings.is_history_up(&key) { return InputAction::HistoryUp; }
-        if self.key_bindings.is_history_down(&key) { return InputAction::HistoryDown; }
-        if self.key_bindings.is_new_session(&key) { return InputAction::NewSession; }
-        if self.key_bindings.is_resume_session(&key) { return InputAction::ResumeSession; }
-        if self.key_bindings.is_list_sessions(&key) { return InputAction::ListSessions; }
-        if self.key_bindings.is_scroll_up(&key) { return InputAction::ScrollUp; }
-        if self.key_bindings.is_scroll_down(&key) { return InputAction::ScrollDown; }
+        if self.key_bindings.is_quit(&key) {
+            return InputAction::Quit;
+        }
+        if self.key_bindings.is_submit(&key) {
+            return InputAction::Submit;
+        }
+        if self.key_bindings.is_command_mode(&key) {
+            return InputAction::EnterCommandMode;
+        }
+        if self.key_bindings.is_exit_command_mode(&key) {
+            return InputAction::ExitCommandMode;
+        }
+        if self.key_bindings.is_history_up(&key) {
+            return InputAction::HistoryUp;
+        }
+        if self.key_bindings.is_history_down(&key) {
+            return InputAction::HistoryDown;
+        }
+        if self.key_bindings.is_new_session(&key) {
+            return InputAction::NewSession;
+        }
+        if self.key_bindings.is_resume_session(&key) {
+            return InputAction::ResumeSession;
+        }
+        if self.key_bindings.is_list_sessions(&key) {
+            return InputAction::ListSessions;
+        }
+        if self.key_bindings.is_scroll_up(&key) {
+            return InputAction::ScrollUp;
+        }
+        if self.key_bindings.is_scroll_down(&key) {
+            return InputAction::ScrollDown;
+        }
         InputAction::PassThrough(key)
     }
 
+    #[must_use]
     pub fn process_mouse(&self, mouse: &MouseEvent) -> MouseAction {
         use crossterm::event::{MouseButton, MouseEventKind};
         let parsed = ParsedMouseEvent::from(mouse);
@@ -206,8 +290,13 @@ impl InputProcessor {
         }
     }
 
-    pub fn key_bindings(&self) -> &KeyBindings { &self.key_bindings }
-    pub fn key_bindings_mut(&mut self) -> &mut KeyBindings { &mut self.key_bindings }
+    #[must_use]
+    pub fn key_bindings(&self) -> &KeyBindings {
+        &self.key_bindings
+    }
+    pub fn key_bindings_mut(&mut self) -> &mut KeyBindings {
+        &mut self.key_bindings
+    }
 }
 
 #[cfg(test)]
@@ -233,8 +322,14 @@ mod tests {
     #[test]
     fn test_input_processor() {
         let processor = InputProcessor::new();
-        assert_eq!(processor.process_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)), InputAction::Quit);
-        assert_eq!(processor.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)), InputAction::Submit);
+        assert_eq!(
+            processor.process_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            InputAction::Quit
+        );
+        assert_eq!(
+            processor.process_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            InputAction::Submit
+        );
         match processor.process_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)) {
             InputAction::PassThrough(k) => assert_eq!(k.code, KeyCode::Char('a')),
             _ => panic!("Expected PassThrough"),

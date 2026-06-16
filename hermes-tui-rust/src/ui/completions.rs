@@ -3,16 +3,15 @@
 //! This module provides a popup dialog for autocomplete suggestions
 //! (such as slash commands, paths, etc.) displayed above the input composer.
 
+use crate::protocol::types::CompletionItem;
+use crate::state::config::ChatColorsRgb;
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Clear, List, ListItem},
     Frame,
 };
-use crate::state::config::ChatColorsRgb;
-use crate::protocol::types::CompletionItem;
 
-/// Completion popup component
 #[derive(Debug, Clone)]
 pub struct CompletionPopup {
     /// Autocomplete items
@@ -21,24 +20,29 @@ pub struct CompletionPopup {
     visible: bool,
     /// Currently selected index
     selected_index: usize,
+    /// Start position to replace in input
+    replace_from: Option<usize>,
     /// UI colors from configuration
     colors: ChatColorsRgb,
 }
 
 impl CompletionPopup {
     /// Create a new completion popup instance
+    #[must_use]
     pub fn new(colors: ChatColorsRgb) -> Self {
         Self {
             items: Vec::new(),
             visible: false,
             selected_index: 0,
+            replace_from: None,
             colors,
         }
     }
 
     /// Show the completion popup with items
-    pub fn show(&mut self, items: Vec<CompletionItem>) {
+    pub fn show(&mut self, items: Vec<CompletionItem>, replace_from: Option<usize>) {
         self.items = items;
+        self.replace_from = replace_from;
         self.selected_index = 0;
         self.visible = !self.items.is_empty();
     }
@@ -47,14 +51,23 @@ impl CompletionPopup {
     pub fn hide(&mut self) {
         self.visible = false;
         self.items.clear();
+        self.replace_from = None;
     }
 
     /// Check if the popup is visible
+    #[must_use]
     pub fn is_visible(&self) -> bool {
         self.visible
     }
 
+    /// Get the replacement start index
+    #[must_use]
+    pub fn replace_from(&self) -> Option<usize> {
+        self.replace_from
+    }
+
     /// Get the currently selected completion item
+    #[must_use]
     pub fn selected_item(&self) -> Option<&CompletionItem> {
         if self.visible && !self.items.is_empty() {
             self.items.get(self.selected_index)
@@ -90,7 +103,9 @@ impl CompletionPopup {
         // Use the passed area directly — caller (app.rs) already positions it above the composer.
         // No additional Y-offset to avoid double-subtraction bug.
         let max_height = 8;
-        let height = (self.items.len() as u16 + 2).min(max_height).min(composer_area.height);
+        let height = (self.items.len() as u16 + 2)
+            .min(max_height)
+            .min(composer_area.height);
         let popup_area = Rect::new(
             composer_area.x,
             composer_area.y,
@@ -129,8 +144,7 @@ impl CompletionPopup {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(self.colors.border));
 
-        let list = List::new(list_items)
-            .block(block);
+        let list = List::new(list_items).block(block);
 
         frame.render_widget(list, popup_area);
     }
@@ -162,15 +176,13 @@ mod tests {
         let mut popup = CompletionPopup::new(create_test_colors());
         assert!(!popup.is_visible());
 
-        let items = vec![
-            CompletionItem {
-                display: "help".to_string(),
-                text: "/help".to_string(),
-                meta: Some("Show help".to_string()),
-            },
-        ];
+        let items = vec![CompletionItem {
+            display: "help".to_string(),
+            text: "/help".to_string(),
+            meta: Some("Show help".to_string()),
+        }];
 
-        popup.show(items);
+        popup.show(items, None);
         assert!(popup.is_visible());
 
         popup.hide();
@@ -193,7 +205,7 @@ mod tests {
             },
         ];
 
-        popup.show(items);
+        popup.show(items, None);
         assert_eq!(popup.selected_index, 0);
         assert_eq!(popup.selected_item().unwrap().display, "help");
 

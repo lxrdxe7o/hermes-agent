@@ -7,6 +7,6 @@ pub mod keys;
 pub mod mouse;
 
 // Re-export when modules are implemented
- pub use input::*;
- pub use keys::*;
- pub use mouse::*;
+pub use input::*;
+pub use keys::*;
+pub use mouse::*;

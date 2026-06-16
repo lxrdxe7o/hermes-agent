@@ -23,11 +23,13 @@ impl Default for ChatKeyboardHandler {
 
 impl ChatKeyboardHandler {
     /// Create a new chat keyboard handler
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Create a new chat keyboard handler with custom scroll steps
+    #[must_use]
     pub fn with_steps(scroll_step: u16, page_step: u16) -> Self {
         Self {
             scroll_step,
@@ -37,6 +39,7 @@ impl ChatKeyboardHandler {
 
     /// Handle a key event for chat navigation
     /// Returns the scroll amount (positive = down, negative = up)
+    #[must_use]
     pub fn handle_key(&self, key: &KeyEvent, visible_height: u16) -> i16 {
         let code = key.code;
         let modifiers = key.modifiers;
@@ -85,11 +88,13 @@ impl ChatKeyboardHandler {
     }
 
     /// Get the scroll step size
+    #[must_use]
     pub fn scroll_step(&self) -> u16 {
         self.scroll_step
     }
 
     /// Get the page step size
+    #[must_use]
     pub fn page_step(&self) -> u16 {
         self.page_step
     }
@@ -103,18 +108,26 @@ pub struct InputKeyboardHandler {
 
 impl InputKeyboardHandler {
     /// Create a new input keyboard handler
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Create a new input keyboard handler with custom tab width
+    #[must_use]
     pub fn with_tab_width(tab_width: usize) -> Self {
         Self { tab_width }
     }
 
     /// Handle a key event for text input
     /// Returns the action to take
-    pub fn handle_input_key(&self, key: KeyEvent, input: &str, cursor_pos: usize) -> TextInputAction {
+    #[must_use]
+    pub fn handle_input_key(
+        &self,
+        key: KeyEvent,
+        input: &str,
+        cursor_pos: usize,
+    ) -> TextInputAction {
         let code = key.code;
         let modifiers = key.modifiers;
 
@@ -196,6 +209,7 @@ impl InputKeyboardHandler {
     }
 
     /// Get the tab width
+    #[must_use]
     pub fn tab_width(&self) -> usize {
         self.tab_width
     }
@@ -242,6 +256,7 @@ pub struct ShortcutRegistry {
 
 impl ShortcutRegistry {
     /// Create a new shortcut registry
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -257,13 +272,13 @@ impl ShortcutRegistry {
     }
 
     /// Find shortcut by key event
+    #[must_use]
     pub fn find_by_key(&self, key: &KeyEvent) -> Option<&Shortcut> {
-        self.shortcuts
-            .iter()
-            .find(|s| s.key == *key)
+        self.shortcuts.iter().find(|s| s.key == *key)
     }
 
     /// Find shortcut by action name
+    #[must_use]
     pub fn find_by_action(&self, action: &str) -> Vec<&Shortcut> {
         self.shortcuts
             .iter()
@@ -272,6 +287,7 @@ impl ShortcutRegistry {
     }
 
     /// Get all shortcuts
+    #[must_use]
     pub fn all(&self) -> &[Shortcut] {
         &self.shortcuts
     }
@@ -344,6 +360,7 @@ impl Default for KeyboardState {
 
 impl KeyboardState {
     /// Create a new keyboard state
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -354,6 +371,7 @@ impl KeyboardState {
     }
 
     /// Check if a modifier is active
+    #[must_use]
     pub fn has_modifier(&self, modifier: KeyModifiers) -> bool {
         self.active_modifiers.contains(modifier)
     }

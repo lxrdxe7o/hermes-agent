@@ -52,7 +52,11 @@ pub struct ApprovalPrompt {
 
 impl ApprovalPrompt {
     /// Create a new approval prompt
-    pub fn new(message: impl Into<String>, tool_name: Option<String>, colors: ChatColorsRgb) -> Self {
+    pub fn new(
+        message: impl Into<String>,
+        tool_name: Option<String>,
+        colors: ChatColorsRgb,
+    ) -> Self {
         Self {
             message: message.into(),
             tool_name,
@@ -84,6 +88,7 @@ impl ApprovalPrompt {
     }
 
     /// Get the message
+    #[must_use]
     pub fn message(&self) -> &str {
         &self.message
     }
@@ -94,6 +99,7 @@ impl ApprovalPrompt {
     }
 
     /// Get the tool name
+    #[must_use]
     pub fn tool_name(&self) -> Option<&String> {
         self.tool_name.as_ref()
     }
@@ -104,6 +110,7 @@ impl ApprovalPrompt {
     }
 
     /// Get the state
+    #[must_use]
     pub fn state(&self) -> PromptState {
         self.state
     }
@@ -124,16 +131,19 @@ impl ApprovalPrompt {
     }
 
     /// Check if approved
+    #[must_use]
     pub fn is_approved(&self) -> bool {
         self.state == PromptState::Approved
     }
 
     /// Check if denied
+    #[must_use]
     pub fn is_denied(&self) -> bool {
         self.state == PromptState::Denied
     }
 
     /// Check if pending
+    #[must_use]
     pub fn is_pending(&self) -> bool {
         self.state == PromptState::Pending
     }
@@ -160,24 +170,24 @@ impl ApprovalPrompt {
 
         // Inner area
         let inner_area = block.inner(area);
-        
+
         // Render the block
         frame.render_widget(block, area);
 
         // Build content
         let mut lines = Vec::new();
-        
+
         // Add tool name if present
         if let Some(tool) = &self.tool_name {
             lines.push(Line::from(Span::styled(
-                format!("Tool: {} ", tool),
+                format!("Tool: {tool} "),
                 Style::new().fg(self.colors.tool_text).bold(),
             )));
         }
-        
+
         // Add message
         lines.push(Line::from(Span::raw(&self.message)));
-        
+
         // Add instructions
         match self.state {
             PromptState::Pending => {
@@ -206,7 +216,7 @@ impl ApprovalPrompt {
             .style(Style::new().fg(self.colors.code_text))
             .block(Block::new().padding(Padding::new(1, 1, 1, 1)))
             .alignment(Alignment::Left);
-        
+
         frame.render_widget(paragraph, inner_area);
     }
 }
@@ -224,16 +234,26 @@ pub struct ClarifyPrompt {
     active: bool,
     /// Colors from configuration
     colors: ChatColorsRgb,
+    /// Optional choices for selection
+    choices: Option<Vec<String>>,
+    /// Selected index for choices
+    selected_index: usize,
 }
 
 impl ClarifyPrompt {
     /// Create a new clarification prompt
-    pub fn new(message: impl Into<String>, colors: ChatColorsRgb) -> Self {
+    pub fn new(
+        message: impl Into<String>,
+        choices: Option<Vec<String>>,
+        colors: ChatColorsRgb,
+    ) -> Self {
         Self {
             message: message.into(),
             response: String::new(),
             active: true,
             colors,
+            choices,
+            selected_index: 0,
         }
     }
 
@@ -241,6 +261,7 @@ impl ClarifyPrompt {
     pub fn with_defaults(message: impl Into<String>) -> Self {
         Self::new(
             message,
+            None,
             ChatColorsRgb {
                 user_bg: ratatui::style::Color::Indexed(238),
                 user_text: ratatui::style::Color::Indexed(252),
@@ -259,6 +280,7 @@ impl ClarifyPrompt {
     }
 
     /// Get the message
+    #[must_use]
     pub fn message(&self) -> &str {
         &self.message
     }
@@ -269,6 +291,7 @@ impl ClarifyPrompt {
     }
 
     /// Get the response
+    #[must_use]
     pub fn response(&self) -> &str {
         &self.response
     }
@@ -289,6 +312,7 @@ impl ClarifyPrompt {
     }
 
     /// Check if active
+    #[must_use]
     pub fn is_active(&self) -> bool {
         self.active
     }
@@ -301,6 +325,61 @@ impl ClarifyPrompt {
     /// Set the colors
     pub fn set_colors(&mut self, colors: ChatColorsRgb) {
         self.colors = colors;
+    }
+
+    /// Get the choices
+    #[must_use]
+    pub fn choices(&self) -> Option<&[String]> {
+        self.choices.as_deref()
+    }
+
+    /// Get the selected index
+    #[must_use]
+    pub fn selected_index(&self) -> usize {
+        self.selected_index
+    }
+
+    /// Set the selected index
+    pub fn set_selected_index(&mut self, index: usize) {
+        if let Some(choices) = &self.choices {
+            if index < choices.len() {
+                self.selected_index = index;
+            }
+        }
+    }
+
+    /// Move to next choice
+    pub fn next_choice(&mut self) {
+        if let Some(choices) = &self.choices {
+            if !choices.is_empty() {
+                self.selected_index = (self.selected_index + 1) % choices.len();
+            }
+        }
+    }
+
+    /// Move to previous choice
+    pub fn prev_choice(&mut self) {
+        if let Some(choices) = &self.choices {
+            if !choices.is_empty() {
+                self.selected_index = if self.selected_index == 0 {
+                    choices.len() - 1
+                } else {
+                    self.selected_index - 1
+                };
+            }
+        }
+    }
+
+    /// Submit a specific choice by index
+    pub fn submit_choice(&mut self, index: usize) -> String {
+        self.active = false;
+        if let Some(choices) = &self.choices {
+            if index < choices.len() {
+                self.selected_index = index;
+                return choices[index].clone();
+            }
+        }
+        String::new()
     }
 
     /// Submit the response
@@ -324,11 +403,7 @@ impl ClarifyPrompt {
         } else {
             // Manually darken the color for inactive state
             match self.colors.border {
-                Color::Rgb(r, g, b) => Color::Rgb(
-                    (r / 2).min(255),
-                    (g / 2).min(255),
-                    (b / 2).min(255),
-                ),
+                Color::Rgb(r, g, b) => Color::Rgb(r / 2, g / 2, b / 2),
                 Color::Indexed(i) => Color::Indexed(i.saturating_sub(8)),
                 other => other,
             }
@@ -344,34 +419,67 @@ impl ClarifyPrompt {
 
         // Inner area
         let inner_area = block.inner(area);
-        
+
         // Render the block
         frame.render_widget(block, area);
 
         // Build content
         let mut lines = Vec::new();
-        
+
         // Add message
         lines.push(Line::from(Span::raw(&self.message)));
         lines.push(Line::from(Span::raw("")));
-        
-        // Add response
-        let response_text = if self.response.is_empty() {
-            "Enter your response..."
+
+        if let Some(choices) = &self.choices {
+            for (i, choice) in choices.iter().enumerate() {
+                let is_selected = i == self.selected_index;
+                let prefix = if is_selected { " > " } else { "   " };
+                let num_prefix = format!("{}. ", i + 1);
+
+                let line = if is_selected {
+                    Line::from(vec![
+                        Span::styled(prefix, Style::new().fg(self.colors.border).bold()),
+                        Span::styled(num_prefix, Style::new().fg(self.colors.code_text).bold()),
+                        Span::styled(
+                            choice,
+                            Style::new().fg(self.colors.code_text).bold().underlined(),
+                        ),
+                    ])
+                } else {
+                    Line::from(vec![
+                        Span::raw(prefix),
+                        Span::raw(num_prefix),
+                        Span::styled(choice, Style::new().fg(self.colors.timestamp).dim()),
+                    ])
+                };
+                lines.push(line);
+            }
+
+            // Add instructions at the bottom
+            lines.push(Line::from(Span::raw("")));
+            lines.push(Line::from(Span::styled(
+                "Use Up/Down to navigate, Enter to select, Esc to cancel",
+                Style::new().fg(self.colors.timestamp).dim(),
+            )));
         } else {
-            &self.response
-        };
-        lines.push(Line::from(Span::styled(
-            response_text,
-            Style::new().fg(self.colors.code_text),
-        )));
+            // Add response
+            let response_text = if self.response.is_empty() {
+                "Enter your response..."
+            } else {
+                &self.response
+            };
+            lines.push(Line::from(Span::styled(
+                response_text,
+                Style::new().fg(self.colors.code_text),
+            )));
+        }
 
         // Create paragraph with content
         let paragraph = Paragraph::new(Text::from(lines))
             .style(Style::new().fg(self.colors.code_text))
             .block(Block::new().padding(Padding::new(1, 1, 1, 1)))
             .alignment(Alignment::Left);
-        
+
         frame.render_widget(paragraph, inner_area);
     }
 }
@@ -430,6 +538,7 @@ impl SecretPrompt {
     }
 
     /// Get the message
+    #[must_use]
     pub fn message(&self) -> &str {
         &self.message
     }
@@ -440,6 +549,7 @@ impl SecretPrompt {
     }
 
     /// Get the secret (use with caution!)
+    #[must_use]
     pub fn secret(&self) -> &str {
         &self.secret
     }
@@ -463,6 +573,7 @@ impl SecretPrompt {
     }
 
     /// Check if active
+    #[must_use]
     pub fn is_active(&self) -> bool {
         self.active
     }
@@ -505,11 +616,7 @@ impl SecretPrompt {
         } else {
             // Manually darken the color for inactive state
             match self.colors.border {
-                Color::Rgb(r, g, b) => Color::Rgb(
-                    (r / 2).min(255),
-                    (g / 2).min(255),
-                    (b / 2).min(255),
-                ),
+                Color::Rgb(r, g, b) => Color::Rgb(r / 2, g / 2, b / 2),
                 Color::Indexed(i) => Color::Indexed(i.saturating_sub(8)),
                 other => other,
             }
@@ -525,17 +632,17 @@ impl SecretPrompt {
 
         // Inner area
         let inner_area = block.inner(area);
-        
+
         // Render the block
         frame.render_widget(block, area);
 
         // Build content
         let mut lines = Vec::new();
-        
+
         // Add message
         lines.push(Line::from(Span::raw(&self.message)));
         lines.push(Line::from(Span::raw("")));
-        
+
         // Add masked input
         let input_text = if self.display_text.is_empty() {
             "Enter secure input..."
@@ -552,7 +659,7 @@ impl SecretPrompt {
             .style(Style::new().fg(self.colors.code_text))
             .block(Block::new().padding(Padding::new(1, 1, 1, 1)))
             .alignment(Alignment::Left);
-        
+
         frame.render_widget(paragraph, inner_area);
     }
 }
@@ -572,6 +679,7 @@ pub struct PromptManager {
 
 impl PromptManager {
     /// Create a new prompt manager
+    #[must_use]
     pub fn new(colors: ChatColorsRgb) -> Self {
         Self {
             approval_prompt: None,
@@ -582,6 +690,7 @@ impl PromptManager {
     }
 
     /// Create a new prompt manager with defaults
+    #[must_use]
     pub fn with_defaults() -> Self {
         Self::new(ChatColorsRgb {
             user_bg: ratatui::style::Color::Indexed(238),
@@ -600,25 +709,43 @@ impl PromptManager {
     }
 
     /// Check if any prompt is active
+    #[must_use]
     pub fn has_active_prompt(&self) -> bool {
-        self.approval_prompt.as_ref().map_or(false, |p| p.is_pending())
-            || self.clarify_prompt.as_ref().map_or(false, |p| p.is_active())
-            || self.secret_prompt.as_ref().map_or(false, |p| p.is_active())
+        self.approval_prompt
+            .as_ref()
+            .is_some_and(ApprovalPrompt::is_pending)
+            || self
+                .clarify_prompt
+                .as_ref()
+                .is_some_and(ClarifyPrompt::is_active)
+            || self
+                .secret_prompt
+                .as_ref()
+                .is_some_and(SecretPrompt::is_active)
     }
 
     /// Check if approval prompt is active
+    #[must_use]
     pub fn is_approval_active(&self) -> bool {
-        self.approval_prompt.as_ref().map_or(false, |p| p.is_pending())
+        self.approval_prompt
+            .as_ref()
+            .is_some_and(ApprovalPrompt::is_pending)
     }
 
     /// Check if clarification prompt is active
+    #[must_use]
     pub fn is_clarify_active(&self) -> bool {
-        self.clarify_prompt.as_ref().map_or(false, |p| p.is_active())
+        self.clarify_prompt
+            .as_ref()
+            .is_some_and(ClarifyPrompt::is_active)
     }
 
     /// Check if secret prompt is active
+    #[must_use]
     pub fn is_secret_active(&self) -> bool {
-        self.secret_prompt.as_ref().map_or(false, |p| p.is_active())
+        self.secret_prompt
+            .as_ref()
+            .is_some_and(SecretPrompt::is_active)
     }
 
     /// Show an approval prompt
@@ -629,10 +756,10 @@ impl PromptManager {
     }
 
     /// Show a clarification prompt
-    pub fn show_clarify(&mut self, message: impl Into<String>) {
+    pub fn show_clarify(&mut self, message: impl Into<String>, choices: Option<Vec<String>>) {
         self.approval_prompt = None;
         self.secret_prompt = None;
-        self.clarify_prompt = Some(ClarifyPrompt::new(message, self.colors));
+        self.clarify_prompt = Some(ClarifyPrompt::new(message, choices, self.colors));
     }
 
     /// Show a secret prompt
@@ -663,18 +790,43 @@ impl PromptManager {
     }
 
     /// Get the approval response (if any)
+    #[must_use]
     pub fn get_approval_response(&self) -> Option<bool> {
-        self.approval_prompt.as_ref().map(|p| p.is_approved())
+        self.approval_prompt
+            .as_ref()
+            .map(ApprovalPrompt::is_approved)
     }
 
     /// Submit the clarify response
     pub fn submit_clarify(&mut self) -> Option<String> {
-        self.clarify_prompt.as_mut().map(|p| p.submit())
+        self.clarify_prompt.as_mut().map(|p| {
+            if p.choices().is_some() {
+                p.submit_choice(p.selected_index())
+            } else {
+                p.submit()
+            }
+        })
+    }
+
+    /// Cancel the clarify prompt
+    pub fn cancel_clarify(&mut self) {
+        if let Some(prompt) = &mut self.clarify_prompt {
+            prompt.cancel();
+        }
+        self.clarify_prompt = None;
+    }
+
+    /// Cancel the secret prompt
+    pub fn cancel_secret(&mut self) {
+        if let Some(prompt) = &mut self.secret_prompt {
+            prompt.cancel();
+        }
+        self.secret_prompt = None;
     }
 
     /// Submit the secret response
     pub fn submit_secret(&mut self) -> Option<String> {
-        self.secret_prompt.as_mut().map(|p| p.submit())
+        self.secret_prompt.as_mut().map(SecretPrompt::submit)
     }
 
     /// Cancel all prompts
@@ -713,18 +865,17 @@ impl PromptManager {
                 return;
             }
         }
-        
+
         if let Some(prompt) = &self.clarify_prompt {
             if prompt.is_active() {
                 prompt.render(frame, area);
                 return;
             }
         }
-        
+
         if let Some(prompt) = &self.approval_prompt {
             if prompt.is_pending() {
                 prompt.render(frame, area);
-                return;
             }
         }
     }
@@ -771,12 +922,12 @@ mod tests {
     fn test_approval_prompt_approve_deny() {
         let colors = create_test_colors();
         let mut prompt = ApprovalPrompt::new("Test", None, colors);
-        
+
         assert!(prompt.is_pending());
-        
+
         prompt.approve();
         assert!(prompt.is_approved());
-        
+
         prompt.deny();
         assert!(prompt.is_denied());
     }
@@ -785,10 +936,10 @@ mod tests {
     fn test_approval_prompt_setters() {
         let colors = create_test_colors();
         let mut prompt = ApprovalPrompt::new("Test", None, colors);
-        
+
         prompt.set_message("New message");
         assert_eq!(prompt.message(), "New message");
-        
+
         prompt.set_tool_name(Some("new_tool".to_string()));
         assert_eq!(prompt.tool_name(), Some(&"new_tool".to_string()));
     }
@@ -796,7 +947,7 @@ mod tests {
     #[test]
     fn test_clarify_prompt_new() {
         let colors = create_test_colors();
-        let prompt = ClarifyPrompt::new("Test message", colors);
+        let prompt = ClarifyPrompt::new("Test message", None, colors);
         assert_eq!(prompt.message(), "Test message");
         assert!(prompt.response().is_empty());
         assert!(prompt.is_active());
@@ -812,14 +963,14 @@ mod tests {
     #[test]
     fn test_clarify_prompt_response() {
         let colors = create_test_colors();
-        let mut prompt = ClarifyPrompt::new("Test", colors);
-        
+        let mut prompt = ClarifyPrompt::new("Test", None, colors);
+
         prompt.append_response("Hello");
         assert_eq!(prompt.response(), "Hello");
-        
+
         prompt.append_response(" World");
         assert_eq!(prompt.response(), "Hello World");
-        
+
         prompt.clear_response();
         assert!(prompt.response().is_empty());
     }
@@ -827,13 +978,43 @@ mod tests {
     #[test]
     fn test_clarify_prompt_submit() {
         let colors = create_test_colors();
-        let mut prompt = ClarifyPrompt::new("Test", colors);
-        
+        let mut prompt = ClarifyPrompt::new("Test", None, colors);
+
         prompt.append_response("Response");
         let submitted = prompt.submit();
-        
+
         assert_eq!(submitted, "Response");
         assert!(prompt.response().is_empty());
+        assert!(!prompt.is_active());
+    }
+
+    #[test]
+    fn test_clarify_prompt_choices() {
+        let colors = create_test_colors();
+        let choices = vec![
+            "Option 1".to_string(),
+            "Option 2".to_string(),
+            "Option 3".to_string(),
+        ];
+        let mut prompt = ClarifyPrompt::new("Pick one", Some(choices.clone()), colors);
+
+        assert_eq!(prompt.choices().unwrap(), &choices[..]);
+        assert_eq!(prompt.selected_index(), 0);
+
+        prompt.next_choice();
+        assert_eq!(prompt.selected_index(), 1);
+
+        prompt.next_choice();
+        assert_eq!(prompt.selected_index(), 2);
+
+        prompt.next_choice();
+        assert_eq!(prompt.selected_index(), 0);
+
+        prompt.prev_choice();
+        assert_eq!(prompt.selected_index(), 2);
+
+        let submitted = prompt.submit_choice(1);
+        assert_eq!(submitted, "Option 2");
         assert!(!prompt.is_active());
     }
 
@@ -857,14 +1038,14 @@ mod tests {
     fn test_secret_prompt_input() {
         let colors = create_test_colors();
         let mut prompt = SecretPrompt::new("Test", colors);
-        
+
         prompt.append_secret('a');
         prompt.append_secret('b');
         prompt.append_secret('c');
-        
+
         assert_eq!(prompt.secret(), "abc");
         assert_eq!(prompt.display_text, "***");
-        
+
         prompt.pop_secret();
         assert_eq!(prompt.secret(), "ab");
         assert_eq!(prompt.display_text, "**");
@@ -874,16 +1055,16 @@ mod tests {
     fn test_secret_prompt_submit() {
         let colors = create_test_colors();
         let mut prompt = SecretPrompt::new("Test", colors);
-        
+
         prompt.append_secret('s');
         prompt.append_secret('e');
         prompt.append_secret('c');
         prompt.append_secret('r');
         prompt.append_secret('e');
         prompt.append_secret('t');
-        
+
         let submitted = prompt.submit();
-        
+
         assert_eq!(submitted, "secret");
         assert!(prompt.secret().is_empty());
         assert!(prompt.display_text.is_empty());
@@ -907,7 +1088,7 @@ mod tests {
     fn test_prompt_manager_show_approval() {
         let colors = create_test_colors();
         let mut manager = PromptManager::new(colors);
-        
+
         manager.show_approval("Test", Some("tool".to_string()));
         assert!(manager.has_active_prompt());
     }
@@ -916,8 +1097,8 @@ mod tests {
     fn test_prompt_manager_show_clarify() {
         let colors = create_test_colors();
         let mut manager = PromptManager::new(colors);
-        
-        manager.show_clarify("Test");
+
+        manager.show_clarify("Test", None);
         assert!(manager.has_active_prompt());
     }
 
@@ -925,7 +1106,7 @@ mod tests {
     fn test_prompt_manager_show_secret() {
         let colors = create_test_colors();
         let mut manager = PromptManager::new(colors);
-        
+
         manager.show_secret("Test");
         assert!(manager.has_active_prompt());
     }
@@ -934,12 +1115,12 @@ mod tests {
     fn test_prompt_manager_approve_deny() {
         let colors = create_test_colors();
         let mut manager = PromptManager::new(colors);
-        
+
         manager.show_approval("Test", None);
-        
+
         assert!(manager.approve());
         assert!(manager.get_approval_response() == Some(true));
-        
+
         manager.show_approval("Test 2", None);
         assert!(manager.deny());
         assert!(manager.get_approval_response() == Some(false));
@@ -949,13 +1130,13 @@ mod tests {
     fn test_prompt_manager_cancel_all() {
         let colors = create_test_colors();
         let mut manager = PromptManager::new(colors);
-        
+
         manager.show_approval("Test", None);
-        manager.show_clarify("Test");
+        manager.show_clarify("Test", None);
         manager.show_secret("Test");
-        
+
         assert!(manager.has_active_prompt());
-        
+
         manager.cancel_all();
         assert!(!manager.has_active_prompt());
     }

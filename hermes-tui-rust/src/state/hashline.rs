@@ -60,6 +60,7 @@ pub struct HashlineParser;
 
 impl HashlineParser {
     /// Create a new parser
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -71,6 +72,7 @@ impl HashlineParser {
     /// - First line: `[path/to/file.rs#TAG]` (optional header)
     /// - Followed by edit commands like: `replace N..M:`, `delete N`, `insert after N:`
     /// - Followed by body lines prefixed with `+` for additions
+    #[must_use]
     pub fn parse(content: &str) -> Option<HashlineEditBlock> {
         let mut lines = content.lines().peekable();
 
@@ -141,7 +143,8 @@ mod tests {
 
     #[test]
     fn test_parse_hashline_simple() {
-        let content = "[src/main.rs#A1B2]\nreplace 1..3:\n+fn main() {\n+    println!(\"hello\");\n}";
+        let content =
+            "[src/main.rs#A1B2]\nreplace 1..3:\n+fn main() {\n+    println!(\"hello\");\n}";
         let block = HashlineParser::parse(content);
         assert!(block.is_some());
         let block = block.unwrap();
@@ -152,7 +155,6 @@ mod tests {
         assert_eq!(block.edits[1].edit_type, HashlineEditType::Addition);
         assert_eq!(block.edits[1].content, "    println!(\"hello\");");
     }
-
 
     #[test]
     fn test_parse_hashline_no_header() {

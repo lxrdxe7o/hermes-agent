@@ -19,11 +19,11 @@ impl Banner {
     /// Render the banner with Kraken logo and branding
     pub fn render(&self, frame: &mut Frame, area: Rect) {
         let colors = [
-            Color::Rgb(166, 226, 46),   // #A6E22E (Neon Green)
+            Color::Rgb(166, 226, 46), // #A6E22E (Neon Green)
             Color::Rgb(166, 226, 46),
-            Color::Rgb(230, 219, 116),  // #E6DB74 (Yellow)
+            Color::Rgb(230, 219, 116), // #E6DB74 (Yellow)
             Color::Rgb(230, 219, 116),
-            Color::Rgb(174, 129, 255),  // #AE81FF (Purple)
+            Color::Rgb(174, 129, 255), // #AE81FF (Purple)
             Color::Rgb(174, 129, 255),
         ];
 
@@ -55,10 +55,30 @@ impl Banner {
     /// Render the smaller version of the banner (just tagline or logo)
     pub fn render_mini(&self, frame: &mut Frame, area: Rect) {
         let line = Line::from(vec![
-            Span::styled(" ≡ ", Style::default().fg(Color::Rgb(174, 129, 255)).add_modifier(Modifier::BOLD)),
-            Span::styled("KRAKEN AGENT", Style::default().fg(Color::Rgb(166, 226, 46)).add_modifier(Modifier::BOLD)),
-            Span::styled(" from the abyss ", Style::default().fg(Color::Rgb(117, 113, 94)).add_modifier(Modifier::ITALIC)),
-            Span::styled(" ≡ ", Style::default().fg(Color::Rgb(174, 129, 255)).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " ≡ ",
+                Style::default()
+                    .fg(Color::Rgb(174, 129, 255))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "KRAKEN AGENT",
+                Style::default()
+                    .fg(Color::Rgb(166, 226, 46))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                " from the abyss ",
+                Style::default()
+                    .fg(Color::Rgb(117, 113, 94))
+                    .add_modifier(Modifier::ITALIC),
+            ),
+            Span::styled(
+                " ≡ ",
+                Style::default()
+                    .fg(Color::Rgb(174, 129, 255))
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]);
 
         let paragraph = Paragraph::new(line).alignment(Alignment::Center);

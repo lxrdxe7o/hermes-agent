@@ -14,7 +14,7 @@ fn main() -> Result<()> {
         .append(true)
         .open("hermes-tui.log")
         .context("Failed to open log file")?;
-    
+
     // Simple custom logger that writes to the file
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .target(env_logger::Target::Pipe(Box::new(log_file)))
@@ -22,7 +22,7 @@ fn main() -> Result<()> {
 
     // Ensure nothing goes to stderr/stdout that could break Ratatui
     // (except what Ratatui itself handles)
-    
+
     info!("--- Kraken Agent TUI Session Start ---");
 
     // Create the app

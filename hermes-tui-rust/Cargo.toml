@@ -51,6 +51,13 @@ fuzzy-matcher = "0.3"
 
 # For better text wrapping
 textwrap = { version = "0.16", features = ["unicode-width"] }
+
+# Markdown parsing for chat rendering
+pulldown-cmark = "0.12"
+
+# Image loading and SIXEL encoding for terminal graphics
+image = "0.25"
+icy_sixel = "0.5"
 unicode-width = "0.1"
 
 # For clipboard support (optional)

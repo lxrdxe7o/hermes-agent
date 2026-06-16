@@ -39,9 +39,9 @@ impl<W: Write + Send + 'static> StdioTransport<W> {
     /// messages.
     pub fn start_reader(&mut self, stdin: impl Read + Send + 'static) -> Receiver<String> {
         let (sender, receiver) = channel::<String>();
-        
+
         let reader = BufReader::new(stdin);
-        
+
         let handle = thread::spawn(move || {
             let mut buf_reader = reader;
             loop {
@@ -58,21 +58,23 @@ impl<W: Write + Send + 'static> StdioTransport<W> {
                         // Try to send the line to the channel
                         if sender.send(line).is_err() {
                             // Channel receiver was dropped, exit thread
-                            debug!("Stdio transport: Channel receiver dropped, exiting reader thread");
+                            debug!(
+                                "Stdio transport: Channel receiver dropped, exiting reader thread"
+                            );
                             break;
                         }
                     }
                     Err(e) => {
                         // Error reading from stdin
-                        error!("Stdio transport: Error reading from stdin: {}", e);
+                        error!("Stdio transport: Error reading from stdin: {e}");
                         break;
                     }
                 }
             }
         });
-        
+
         self.reader_handle = Some(handle);
-        
+
         receiver
     }
 
@@ -81,13 +83,11 @@ impl<W: Write + Send + 'static> StdioTransport<W> {
     /// This writes the given string as a line to stdout, followed by a newline.
     /// The string should be a valid JSON serialization.
     pub fn write_line(&mut self, line: &str) -> Result<()> {
-        writeln!(self.writer, "{}", line)
-            .context("Failed to write line to stdout")?;
-        
+        writeln!(self.writer, "{line}").context("Failed to write line to stdout")?;
+
         // Flush to ensure the line is sent immediately
-        self.writer.flush()
-            .context("Failed to flush stdout")?;
-        
+        self.writer.flush().context("Failed to flush stdout")?;
+
         trace!("Stdio transport: Wrote line of {} bytes", line.len());
         Ok(())
     }
@@ -96,8 +96,7 @@ impl<W: Write + Send + 'static> StdioTransport<W> {
     ///
     /// Serializes the message to JSON and writes it as a line.
     pub fn write_message<T: serde::Serialize>(&mut self, message: &T) -> Result<()> {
-        let json = serde_json::to_string(message)
-            .context("Failed to serialize message to JSON")?;
+        let json = serde_json::to_string(message).context("Failed to serialize message to JSON")?;
         self.write_line(&json)
     }
 
@@ -127,6 +126,7 @@ pub type DefaultTransport = StdioTransport<std::io::Stdout>;
 
 impl DefaultTransport {
     /// Create a transport using real stdin/stdout
+    #[must_use]
     pub fn from_stdio() -> Self {
         Self::new(std::io::stdin(), std::io::stdout())
     }
@@ -140,14 +140,14 @@ impl DefaultTransport {
 mod tests {
     use super::*;
     use serde::Serialize;
-    use std::io::{sink, empty};
+    use std::io::{empty, sink};
 
     #[test]
     fn test_transport_creation() {
         let stdin = empty();
         let stdout = sink();
         let transport = StdioTransport::new(stdin, stdout);
-        
+
         // Transport should be created successfully
         assert!(transport.reader_handle.is_none());
     }
@@ -157,7 +157,7 @@ mod tests {
         let stdin = empty();
         let stdout = sink();
         let mut transport = StdioTransport::new(stdin, stdout);
-        
+
         // Just verify it doesn't panic
         transport.write_line("test output").unwrap();
     }
@@ -167,15 +167,15 @@ mod tests {
         let stdin = empty();
         let stdout = sink();
         let mut transport = StdioTransport::new(stdin, stdout);
-        
+
         #[derive(Serialize)]
         struct TestMessage {
             field: String,
         }
-        
-        let msg = TestMessage { field: "value".to_string() };
+
+        let msg = TestMessage {
+            field: "value".to_string(),
+        };
         transport.write_message(&msg).unwrap();
     }
 }
-
-

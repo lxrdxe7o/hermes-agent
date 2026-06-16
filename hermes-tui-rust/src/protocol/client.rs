@@ -31,8 +31,14 @@ pub struct GatewayClient {
 impl fmt::Debug for GatewayClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GatewayClient")
-            .field("transport", &self.transport.as_ref().map(|_| "StdioTransport<_>"))
-            .field("response_receiver", &self.response_receiver.as_ref().map(|_| "Receiver<_>"))
+            .field(
+                "transport",
+                &self.transport.as_ref().map(|_| "StdioTransport<_>"),
+            )
+            .field(
+                "response_receiver",
+                &self.response_receiver.as_ref().map(|_| "Receiver<_>"),
+            )
             .field("connected", &self.connected)
             .field("next_id", &self.next_id)
             .finish()
@@ -40,6 +46,7 @@ impl fmt::Debug for GatewayClient {
 }
 impl GatewayClient {
     /// Create a new gateway client
+    #[must_use]
     pub fn new() -> Self {
         Self {
             transport: None,
@@ -52,7 +59,7 @@ impl GatewayClient {
 
     /// Connect to the gateway via stdio pipes
     ///
-    /// Spawns a background reader thread via StdioTransport and sets up
+    /// Spawns a background reader thread via `StdioTransport` and sets up
     /// message parsing. Uses non-blocking receive for the event loop.
     pub fn connect<R: Read + Send + 'static, W: Write + Send + 'static>(
         &mut self,
@@ -68,10 +75,8 @@ impl GatewayClient {
         let (response_sender, response_receiver) = std::sync::mpsc::channel::<GatewayMessage>();
 
         // Create StdioTransport with boxed writer
-        let mut transport = StdioTransport::new(
-            std::io::empty(),
-            Box::new(stdout) as Box<dyn Write + Send>,
-        );
+        let mut transport =
+            StdioTransport::new(std::io::empty(), Box::new(stdout) as Box<dyn Write + Send>);
 
         // Start reader thread — returns a receiver for raw JSON lines
         let line_receiver = transport.start_reader(stdin);
@@ -81,8 +86,8 @@ impl GatewayClient {
         // Spawn a parsing thread that converts JSON strings to GatewayMessages
         std::thread::spawn(move || {
             for line in line_receiver {
-                trace!("GatewayClient: Parsing line: {}", line);
-                
+                trace!("GatewayClient: Parsing line: {line}");
+
                 match serde_json::from_str::<JsonRpcMessage>(&line) {
                     Ok(rpc) => {
                         // Handle standard JSON-RPC event notification
@@ -92,9 +97,15 @@ impl GatewayClient {
                                     // The gateway sometimes omits payload (e.g. message.start).
                                     // Inject a null payload so the tagged enum parser doesn't fail.
                                     let mut params = params.clone();
-                                    if !params.as_object().map(|o| o.contains_key("payload")).unwrap_or(false) {
+                                    if !params
+                                        .as_object()
+                                        .is_some_and(|o| o.contains_key("payload"))
+                                    {
                                         if let Some(obj) = params.as_object_mut() {
-                                            obj.insert("payload".to_string(), serde_json::Value::Null);
+                                            obj.insert(
+                                                "payload".to_string(),
+                                                serde_json::Value::Null,
+                                            );
                                         }
                                     }
                                     match serde_json::from_value::<GatewayEvent>(params.clone()) {
@@ -107,9 +118,9 @@ impl GatewayClient {
                                     }
                                 }
                             } else {
-                                warn!("GatewayClient: Received unknown method: {}", method);
+                                warn!("GatewayClient: Received unknown method: {method}");
                             }
-                        } 
+                        }
                         // Handle responses to requests (result or error)
                         else if let Some(id) = rpc.id {
                             let method = {
@@ -119,17 +130,79 @@ impl GatewayClient {
 
                             if let Some(method_name) = method {
                                 if let Some(result) = rpc.result {
-                                    debug!("GatewayClient: Received response for {} (ID {}): {:?}", method_name, id, result);
-                                    
+                                    debug!(
+                                        "GatewayClient: Received response for {method_name} (ID {id}): {result:?}"
+                                    );
+
                                     // Transform the result into a GatewayMessageData variant if possible
                                     // This allows the app to handle results as if they were events
                                     let wrapped_msg = match method_name.as_str() {
-                                        "session.create" => serde_json::from_value(result).ok().map(GatewayMessage::SessionCreate),
-                                        "session.resume" => serde_json::from_value(result).ok().map(GatewayMessage::SessionResume),
-                                        "session.list" => serde_json::from_value(result).ok().map(GatewayMessage::SessionList),
-                                        "session.activate" => serde_json::from_value(result).ok().map(GatewayMessage::SessionActivate),
-                                        "prompt.submit" => serde_json::from_value(result).ok().map(GatewayMessage::PromptSubmit),
-                                        "config.get" => serde_json::from_value(result).ok().map(GatewayMessage::ConfigGet),
+                                        "gateway.ready" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::Ready),
+                                        "session.create" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::SessionCreate),
+                                        "session.resume" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::SessionResume),
+                                        "session.list" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::SessionList),
+                                        "session.close" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::SessionClose),
+                                        "session.activate" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::SessionActivate),
+                                        "prompt.submit" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::PromptSubmit),
+                                        "approval.respond" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::ApprovalRespond),
+                                        "complete.slash" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::SlashCompletion),
+                                        "complete.path" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::PathCompletion),
+                                        "slash.exec" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::SlashExec),
+                                        "config.get" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::ConfigGet),
+                                        "config.set" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::ConfigSet),
+                                        "terminal.resize" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::TerminalResize),
+                                        "clarify.respond" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::ClarifyRespond),
+                                        "sudo.respond" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::SudoRespond),
+                                        "secret.respond" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::SecretRespond),
+                                        "session.interrupt" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::SessionInterrupt),
+                                        "session.most_recent" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::SessionMostRecent),
+                                        "session.delete" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::SessionDelete),
+                                        "session.cwd.set" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::SessionCwdSet),
+                                        "model.options" => serde_json::from_value(result)
+                                            .ok()
+                                            .map(GatewayMessage::ModelOptions),
                                         _ => None,
                                     };
 
@@ -137,14 +210,26 @@ impl GatewayClient {
                                         let _ = response_sender.send(msg);
                                     }
                                 } else if let Some(err) = rpc.error {
-                                    error!("GatewayClient: Received error for {} (ID {}): {}", method_name, id, err.message);
+                                    error!(
+                                        "GatewayClient: Received error for {} (ID {}): {}",
+                                        method_name, id, err.message
+                                    );
+                                    if method_name == "session.most_recent" {
+                                        let _ =
+                                            response_sender
+                                                .send(GatewayMessage::SessionMostRecent(
+                                                crate::protocol::types::SessionMostRecentResponse {
+                                                    session_id: None,
+                                                },
+                                            ));
+                                    }
                                 }
                             }
                         }
                     }
                     Err(e) => {
                         // Some lines might not be JSON (e.g. system logs)
-                        trace!("GatewayClient: Line is not JSON-RPC: {} - Line: {}", e, line);
+                        trace!("GatewayClient: Line is not JSON-RPC: {e} - Line: {line}");
                     }
                 }
             }
@@ -163,7 +248,7 @@ impl GatewayClient {
     pub fn send_request(&mut self, request: TuiRequest) -> Result<()> {
         let mut val = serde_json::to_value(request.clone())
             .context("GatewayClient: Failed to serialize request")?;
-        
+
         let id = self.next_id;
         self.next_id += 1;
 
@@ -183,13 +268,27 @@ impl GatewayClient {
             TuiRequest::ConfigGet(_) => "config.get",
             TuiRequest::ConfigSet { .. } => "config.set",
             TuiRequest::TerminalResize { .. } => "terminal.resize",
+            TuiRequest::ClarifyRespond(_) => "clarify.respond",
+            TuiRequest::SudoRespond(_) => "sudo.respond",
+            TuiRequest::SecretRespond(_) => "secret.respond",
+            TuiRequest::SessionInterrupt { .. } => "session.interrupt",
+            TuiRequest::SessionMostRecent => "session.most_recent",
+            TuiRequest::SessionDelete { .. } => "session.delete",
+            TuiRequest::SessionCwdSet { .. } => "session.cwd.set",
+            TuiRequest::ModelOptions => "model.options",
         };
-        
-        self.pending_requests.lock().unwrap().insert(id, method_name.to_string());
+
+        self.pending_requests
+            .lock()
+            .unwrap()
+            .insert(id, method_name.to_string());
 
         // Add JSON-RPC 2.0 metadata
         if let Some(obj) = val.as_object_mut() {
-            obj.insert("jsonrpc".to_string(), serde_json::Value::String("2.0".to_string()));
+            obj.insert(
+                "jsonrpc".to_string(),
+                serde_json::Value::String("2.0".to_string()),
+            );
             obj.insert("id".to_string(), serde_json::Value::Number(id.into()));
         }
 
@@ -197,7 +296,7 @@ impl GatewayClient {
             .transport
             .as_mut()
             .context("GatewayClient: Not connected")?;
-        
+
         transport
             .write_line(&serde_json::to_string(&val)?)
             .context("GatewayClient: Failed to send request")?;
@@ -206,8 +305,9 @@ impl GatewayClient {
 
     /// Receive a message from the gateway (non-blocking)
     ///
-    /// Uses try_recv() so the caller can continue the event loop
+    /// Uses `try_recv()` so the caller can continue the event loop
     /// instead of blocking when no message is available.
+    #[must_use]
     pub fn receive_message(&self) -> Option<GatewayMessage> {
         self.response_receiver
             .as_ref()
@@ -215,6 +315,7 @@ impl GatewayClient {
     }
 
     /// Check if the client is currently connected
+    #[must_use]
     pub fn is_connected(&self) -> bool {
         self.connected
     }
@@ -248,11 +349,8 @@ mod tests {
     #[test]
     fn test_client_connect_disconnect() {
         let mut client = GatewayClient::new();
-        let result = client.connect(
-            std::io::empty(),
-            std::io::sink(),
-        );
-        
+        let result = client.connect(std::io::empty(), std::io::sink());
+
         // For now, just test that it doesn't panic
         assert!(result.is_ok() || result.is_err());
     }

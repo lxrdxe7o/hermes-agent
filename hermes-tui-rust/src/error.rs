@@ -107,21 +107,25 @@ impl TuiError {
     }
 
     /// Check if this is a connection error
+    #[must_use]
     pub fn is_connection(&self) -> bool {
         matches!(self, Self::Connection(_))
     }
 
     /// Check if this is a protocol error
+    #[must_use]
     pub fn is_protocol(&self) -> bool {
         matches!(self, Self::Protocol(_))
     }
 
     /// Check if this is a state error
+    #[must_use]
     pub fn is_state(&self) -> bool {
         matches!(self, Self::State(_))
     }
 
     /// Get the error message as a string
+    #[must_use]
     pub fn message(&self) -> String {
         match self {
             Self::Io(e) => e.to_string(),
@@ -163,11 +167,9 @@ impl From<anyhow::Error> for TuiError {
 // Conversion from log errors
 impl From<log::SetLoggerError> for TuiError {
     fn from(err: log::SetLoggerError) -> Self {
-        Self::State(format!("Failed to initialize logger: {}", err))
+        Self::State(format!("Failed to initialize logger: {err}"))
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {

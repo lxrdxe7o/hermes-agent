@@ -77,6 +77,7 @@ impl Session {
     }
 
     /// Get the message count
+    #[must_use]
     pub fn message_count(&self) -> usize {
         self.messages.len()
     }
@@ -121,11 +122,13 @@ impl Session {
     }
 
     /// Get the last message
+    #[must_use]
     pub fn last_message(&self) -> Option<&crate::state::messages::Message> {
         self.messages.last()
     }
 
     /// Get all messages
+    #[must_use]
     pub fn messages(&self) -> &MessageHistory {
         &self.messages
     }
@@ -149,6 +152,7 @@ pub struct SessionManager {
 
 impl SessionManager {
     /// Create a new session manager
+    #[must_use]
     pub fn new() -> Self {
         Self {
             sessions: HashMap::new(),
@@ -168,10 +172,10 @@ impl SessionManager {
     pub fn create_session(&mut self) -> &mut Session {
         let id = self.generate_session_id();
         let session = Session::new(id.clone());
-        
+
         self.sessions.insert(id.clone(), session);
         self.current_session_id = Some(id.clone());
-        
+
         self.sessions.get_mut(&id).unwrap()
     }
 
@@ -179,14 +183,15 @@ impl SessionManager {
     pub fn create_session_with_name(&mut self, name: impl Into<String>) -> &mut Session {
         let id = self.generate_session_id();
         let session = Session::with_name(id.clone(), name);
-        
+
         self.sessions.insert(id.clone(), session);
         self.current_session_id = Some(id.clone());
-        
+
         self.sessions.get_mut(&id).unwrap()
     }
 
     /// Get the current session
+    #[must_use]
     pub fn current_session(&self) -> Option<&Session> {
         self.current_session_id
             .as_ref()
@@ -209,13 +214,13 @@ impl SessionManager {
                     current.deactivate();
                 }
             }
-            
+
             // Activate new session
             self.current_session_id = Some(session_id.to_string());
             if let Some(session) = self.sessions.get_mut(session_id) {
                 session.activate();
             }
-            
+
             self.sessions.get_mut(session_id)
         } else {
             None
@@ -223,6 +228,7 @@ impl SessionManager {
     }
 
     /// Get a session by ID
+    #[must_use]
     pub fn get_session(&self, session_id: &str) -> Option<&Session> {
         self.sessions.get(session_id)
     }
@@ -233,11 +239,13 @@ impl SessionManager {
     }
 
     /// Get all sessions
+    #[must_use]
     pub fn sessions(&self) -> &HashMap<String, Session> {
         &self.sessions
     }
 
     /// Get all session IDs
+    #[must_use]
     pub fn session_ids(&self) -> Vec<&String> {
         self.sessions.keys().collect()
     }
@@ -253,7 +261,7 @@ impl SessionManager {
         if Some(session_id) == self.current_session_id.as_deref() {
             return None;
         }
-        
+
         self.sessions.remove(session_id)
     }
 
@@ -265,21 +273,25 @@ impl SessionManager {
     }
 
     /// Number of sessions
+    #[must_use]
     pub fn len(&self) -> usize {
         self.sessions.len()
     }
 
     /// Check if there are no sessions
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.sessions.is_empty()
     }
 
     /// Check if a session exists
+    #[must_use]
     pub fn contains_session(&self, session_id: &str) -> bool {
         self.sessions.contains_key(session_id)
     }
 
     /// Get the current session ID
+    #[must_use]
     pub fn current_session_id(&self) -> Option<&String> {
         self.current_session_id.as_ref()
     }
@@ -288,12 +300,12 @@ impl SessionManager {
     pub fn set_current_session_id(&mut self, session_id: impl Into<String>) {
         self.current_session_id = Some(session_id.into());
     }
-    
+
     /// Set the current session (convenience method)
     pub fn set_current_session(&mut self, session_id: impl Into<String>) {
         self.set_current_session_id(session_id);
     }
-    
+
     /// Set sessions from gateway list response
     pub fn set_sessions(&mut self, session_list: Vec<SessionListItem>) {
         for item in session_list {
@@ -308,7 +320,8 @@ impl SessionManager {
         }
     }
 
-    /// Get session list for display (sorted by updated_at, newest first)
+    /// Get session list for display (sorted by `updated_at`, newest first)
+    #[must_use]
     pub fn session_list(&self) -> Vec<&Session> {
         let mut sessions: Vec<&Session> = self.sessions.values().collect();
         sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -316,6 +329,7 @@ impl SessionManager {
     }
 
     /// Get the most recent session (excluding current)
+    #[must_use]
     pub fn most_recent_session(&self) -> Option<&Session> {
         self.session_list()
             .into_iter()
@@ -347,12 +361,12 @@ mod tests {
     #[test]
     fn test_session_add_message() {
         let mut session = Session::new("test-session");
-        
+
         use crate::state::messages::Message;
-        
+
         session.add_message(Message::user("Hello"));
         session.add_message(Message::assistant("World"));
-        
+
         assert_eq!(session.message_count(), 2);
         assert_eq!(session.last_message().unwrap().content(), "World");
     }
@@ -360,12 +374,12 @@ mod tests {
     #[test]
     fn test_session_activate_deactivate() {
         let mut session = Session::new("test-session");
-        
+
         assert!(!session.is_active);
-        
+
         session.activate();
         assert!(session.is_active);
-        
+
         session.deactivate();
         assert!(!session.is_active);
     }
@@ -380,7 +394,7 @@ mod tests {
     #[test]
     fn test_session_manager_create_session() {
         let mut manager = SessionManager::new();
-        
+
         let session = manager.create_session();
         assert_eq!(session.id, "session-1");
         assert!(manager.current_session_id().is_some());
@@ -390,11 +404,11 @@ mod tests {
     #[test]
     fn test_session_manager_switch_session() {
         let mut manager = SessionManager::new();
-        
+
         let _session1 = manager.create_session();
         let session2 = manager.create_session_with_name("Session 2");
         let session2_id = session2.id.clone();
-        
+
         assert!(manager.switch_session(&session2_id).is_some());
         assert_eq!(manager.current_session_id(), Some(&session2_id));
     }
@@ -402,11 +416,11 @@ mod tests {
     #[test]
     fn test_session_manager_session_list() {
         let mut manager = SessionManager::new();
-        
+
         manager.create_session();
         manager.create_session();
         manager.create_session();
-        
+
         let list = manager.session_list();
         assert_eq!(list.len(), 3);
     }
@@ -414,12 +428,11 @@ mod tests {
     #[test]
     fn test_session_manager_most_recent() {
         let mut manager = SessionManager::new();
-        
+
         manager.create_session_with_name("Session 1");
         manager.create_session_with_name("Session 2");
-        
+
         let most_recent = manager.most_recent_session();
         assert!(most_recent.is_some());
     }
 }
-
