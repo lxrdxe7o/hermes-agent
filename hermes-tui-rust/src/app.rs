@@ -714,49 +714,22 @@ impl App {
             return Ok(());
         }
 
-        // Alt+1 through Alt+4 for top-level view switching (Dashboard, IDE, Kanban, Chat)
-        if key.code == KeyCode::Char('1')
-            && key.modifiers.contains(crossterm::event::KeyModifiers::ALT)
-        {
-            self.current_view = ViewState::Dashboard;
-            return Ok(());
-        }
-        if key.code == KeyCode::Char('2')
-            && key.modifiers.contains(crossterm::event::KeyModifiers::ALT)
-        {
-            self.current_view = ViewState::Ide;
-            return Ok(());
-        }
-        if key.code == KeyCode::Char('3')
-            && key.modifiers.contains(crossterm::event::KeyModifiers::ALT)
-        {
-            self.current_view = ViewState::Kanban;
-            return Ok(());
-        }
-        if key.code == KeyCode::Char('4')
-            && key.modifiers.contains(crossterm::event::KeyModifiers::ALT)
-        {
-            self.current_view = ViewState::Chat;
-            return Ok(());
-        }
-
-        // Number keys 1-4 for focus pane navigation (within Chat view)
-        // These work regardless of current mode or active overlays
+        // Number keys 1-4 for top-level view switching (Dashboard, IDE, Kanban, Chat)
         match key.code {
             KeyCode::Char('1') => {
-                self.set_focus_pane(FocusPane::Chat);
+                self.current_view = ViewState::Dashboard;
                 return Ok(());
             }
             KeyCode::Char('2') => {
-                self.set_focus_pane(FocusPane::Sidebar);
+                self.current_view = ViewState::Ide;
                 return Ok(());
             }
             KeyCode::Char('3') => {
-                self.set_focus_pane(FocusPane::Composer);
+                self.current_view = ViewState::Kanban;
                 return Ok(());
             }
             KeyCode::Char('4') => {
-                self.set_focus_pane(FocusPane::Toolbar);
+                self.current_view = ViewState::Chat;
                 return Ok(());
             }
             _ => {}
