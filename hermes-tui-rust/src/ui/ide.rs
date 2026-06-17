@@ -15,6 +15,7 @@ impl IdeView {
         card_manager: &crate::ui::cards::CardManager,
         subagent_list: &crate::ui::subagent::SubagentList,
         animation_frame: u64,
+        is_running: bool,
     ) {
         // TODO: This is a prototype IDE layout matching the React example.
         // The File Tree and Editor/Diff are currently hardcoded mocks.
@@ -90,6 +91,7 @@ impl IdeView {
             .border_style(Style::default().fg(Color::DarkGray))
             .padding(Padding::new(1, 1, 1, 1));
         frame.render_widget(Paragraph::new(tree_lines).block(tree_block), chunks[0]);
+        crate::ui::borders::render_gradient_border(frame.buffer_mut(), chunks[0], animation_frame, false, is_running);
 
         // 2. Editor
         let mut diff_lines = Vec::new();
@@ -156,6 +158,7 @@ impl IdeView {
             .padding(Padding::new(1, 1, 1, 1));
 
         frame.render_widget(Paragraph::new(diff_lines).block(editor_block), chunks[1]);
+        crate::ui::borders::render_gradient_border(frame.buffer_mut(), chunks[1], animation_frame, is_active, is_running);
 
         // 3. Chat
         let chat_block = Block::default()
@@ -169,6 +172,7 @@ impl IdeView {
 
         let chat_inner = chat_block.inner(chunks[2]);
         frame.render_widget(chat_block, chunks[2]);
+        crate::ui::borders::render_gradient_border(frame.buffer_mut(), chunks[2], animation_frame, false, is_running);
 
         chat_state.visible_height = chat_inner.height.saturating_sub(2);
         chat_component.set_show_logo_on_empty(false);

@@ -10,6 +10,8 @@ impl DashboardView {
         area: Rect,
         gif: Option<&mut AnimatedGif>,
         colors: &ThemeColors,
+        animation_frame: u64,
+        is_running: bool,
     ) {
         // TODO: This is a prototype layout matching the React example.
         // The telemetry values are currently hardcoded or derived from time.
@@ -64,6 +66,7 @@ impl DashboardView {
             .padding(Padding::new(2, 2, 1, 1));
         let inner_area = content_block.inner(chunks[1]);
         frame.render_widget(content_block, chunks[1]);
+        crate::ui::borders::render_gradient_border(frame.buffer_mut(), chunks[1], animation_frame, true, is_running);
 
         let content_chunks = Layout::default()
             .direction(Direction::Horizontal)

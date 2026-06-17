@@ -215,7 +215,7 @@ impl ModelPicker {
     }
 
     /// Render the model picker popup
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, animation_frame: u64) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, animation_frame: u64, is_running: bool) {
         if !self.visible {
             return;
         }
@@ -226,7 +226,7 @@ impl ModelPicker {
         frame.render_widget(Clear, popup_area);
         
         // Render animated gradient border
-        render_gradient_border(frame.buffer_mut(), popup_area, animation_frame, true);
+        render_gradient_border(frame.buffer_mut(), popup_area, animation_frame, true, is_running);
 
         if self.loading {
             self.render_loading(frame, popup_area);

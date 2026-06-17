@@ -2524,6 +2524,8 @@ impl App {
                         main_area,
                         bebop_gif.as_mut(),
                         &config.theme.colors,
+                        animation_frame,
+                        self.thinking,
                     );
                 }
                 ViewState::Ide => {
@@ -2547,6 +2549,7 @@ impl App {
                         card_manager,
                         subagent_list,
                         animation_frame,
+                        self.thinking,
                     );
 
                     input_composer.render_clean(frame, ide_chunks[1]);
@@ -2567,6 +2570,8 @@ impl App {
                         frame,
                         kanban_chunks[0],
                         &config.theme.colors,
+                        animation_frame,
+                        self.thinking,
                     );
 
                     input_composer.render_clean(frame, kanban_chunks[1]);
@@ -2602,7 +2607,7 @@ impl App {
                     let chat_block = Block::bordered();
                     let chat_inner = chat_block.inner(chat_area);
                     frame.render_widget(chat_block, chat_area);
-                    crate::ui::borders::render_gradient_border(frame.buffer_mut(), chat_area, animation_frame, focus_pane == FocusPane::Chat);
+                    crate::ui::borders::render_gradient_border(frame.buffer_mut(), chat_area, animation_frame, focus_pane == FocusPane::Chat, self.thinking);
                     chat_state.visible_height = chat_inner.height.saturating_sub(2);
                     chat_component.set_show_logo_on_empty(true);
                     chat_component.render(frame, chat_inner, chat_state, card_manager, subagent_list, connected, animation_frame);
@@ -2618,14 +2623,14 @@ impl App {
                     let composer_block = Block::bordered();
                     let composer_inner = composer_block.inner(main_layout[3]);
                     frame.render_widget(composer_block, main_layout[3]);
-                    crate::ui::borders::render_gradient_border(frame.buffer_mut(), main_layout[3], animation_frame, focus_pane == FocusPane::Composer);
+                    crate::ui::borders::render_gradient_border(frame.buffer_mut(), main_layout[3], animation_frame, focus_pane == FocusPane::Composer, self.thinking);
                     input_composer.render_inner(frame, composer_inner);
 
                     // Toolbar with animated border
                     let toolbar_block = Block::bordered();
                     let toolbar_inner = toolbar_block.inner(main_layout[5]);
                     frame.render_widget(toolbar_block, main_layout[5]);
-                    crate::ui::borders::render_gradient_border(frame.buffer_mut(), main_layout[5], animation_frame, focus_pane == FocusPane::Toolbar);
+                    crate::ui::borders::render_gradient_border(frame.buffer_mut(), main_layout[5], animation_frame, focus_pane == FocusPane::Toolbar, self.thinking);
                     toolbar.render(frame, toolbar_inner);
 
                     // Sine-wave loading footer (Phase 4 — Aetheric Shaders)
@@ -2639,7 +2644,7 @@ impl App {
                         let sidebar_block = Block::bordered();
                         let sidebar_inner = sidebar_block.inner(sidebar_area);
                         frame.render_widget(sidebar_block, sidebar_area);
-                        crate::ui::borders::render_gradient_border(frame.buffer_mut(), sidebar_area, animation_frame, focus_pane == FocusPane::Sidebar);
+                        crate::ui::borders::render_gradient_border(frame.buffer_mut(), sidebar_area, animation_frame, focus_pane == FocusPane::Sidebar, self.thinking);
                         let sidebar_chunks = Layout::default()
                             .direction(Direction::Vertical)
                             .constraints([
@@ -2651,7 +2656,7 @@ impl App {
                         // Subagents
                         let sub_area = sidebar_chunks[0];
                         if !subagent_list.is_empty() {
-                            subagent_list.render(sub_area, frame, animation_frame);
+                            subagent_list.render(sub_area, frame, animation_frame, self.thinking);
                         }
 
                         // Session sidebar
@@ -2663,10 +2668,10 @@ impl App {
             // ── Overlays (render on top of everything) ──
             let overlay_area = frame.area();
             if session_picker.is_visible() {
-                session_picker.render(frame, overlay_area, animation_frame, current_session_id.as_deref());
+                session_picker.render(frame, overlay_area, animation_frame, current_session_id.as_deref(), self.thinking);
             }
             if model_picker.is_visible() {
-                model_picker.render(frame, overlay_area, animation_frame);
+                model_picker.render(frame, overlay_area, animation_frame, self.thinking);
             }
             if prompt_manager.has_active_prompt() {
                 prompt_manager.render(frame, overlay_area);

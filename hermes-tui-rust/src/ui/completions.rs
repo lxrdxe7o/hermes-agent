@@ -155,7 +155,7 @@ impl CompletionPopup {
         frame.render_stateful_widget(list, popup_area, &mut self.state);
 
         // Render animated gradient border over the block
-        crate::ui::borders::render_gradient_border(frame.buffer_mut(), popup_area, animation_frame, true);
+        crate::ui::borders::render_gradient_border(frame.buffer_mut(), popup_area, animation_frame, true, false);
         
         // Render helper hints
         let hints = Line::from(vec![

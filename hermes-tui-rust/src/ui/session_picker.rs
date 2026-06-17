@@ -140,7 +140,7 @@ impl SessionPicker {
     }
 
     /// Render the centered session picker popup
-    pub fn render(&self, frame: &mut Frame, area: Rect, animation_frame: u64, current_session_id: Option<&str>) {
+    pub fn render(&self, frame: &mut Frame, area: Rect, animation_frame: u64, current_session_id: Option<&str>, is_running: bool) {
         if !self.visible || self.sessions.is_empty() {
             return;
         }
@@ -240,7 +240,7 @@ impl SessionPicker {
         frame.render_widget(list, popup_area);
 
         // Render animated gradient border over the block
-        crate::ui::borders::render_gradient_border(frame.buffer_mut(), popup_area, animation_frame, true);
+        crate::ui::borders::render_gradient_border(frame.buffer_mut(), popup_area, animation_frame, true, is_running);
     }
 }
 

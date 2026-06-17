@@ -538,7 +538,7 @@ impl InputComposer {
         }
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
+    pub fn render(&self, frame: &mut Frame, area: Rect, animation_frame: u64, focused: bool, is_running: bool) {
         let border_style = if self.active {
             Style::new().fg(self.colors.border)
         } else {
@@ -656,6 +656,8 @@ impl InputComposer {
                 frame.set_cursor_position(Position::new(cursor_x, cursor_y));
             }
         }
+
+        crate::ui::borders::render_gradient_border(frame.buffer_mut(), area, animation_frame, focused, is_running);
     }
 }
 

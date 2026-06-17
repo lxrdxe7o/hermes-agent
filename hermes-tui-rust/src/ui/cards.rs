@@ -401,7 +401,7 @@ impl CardComponent {
         let is_running_tool = is_tool && self.status == Some(ToolStatus::Running);
 
         // Render the gradient border (animated if running)
-        crate::ui::borders::render_gradient_border(frame.buffer_mut(), area, animation_frame, is_running_tool);
+        crate::ui::borders::render_gradient_border(frame.buffer_mut(), area, animation_frame, is_running_tool, is_running_tool);
 
         // Create a block for the title and background
         let block = Block::default()

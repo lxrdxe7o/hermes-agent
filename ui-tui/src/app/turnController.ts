@@ -673,7 +673,7 @@ class TurnController {
   }
 
   recordReasoningAvailable(text: string, force = false) {
-    if (this.interrupted || (!force && !getUiState().showReasoning)) {
+    if (this.interrupted) {
       return
     }
 
@@ -691,7 +691,7 @@ class TurnController {
   }
 
   recordReasoningDelta(text: string, force = false) {
-    if (this.interrupted || (!force && !getUiState().showReasoning)) {
+    if (this.interrupted) {
       return
     }
 

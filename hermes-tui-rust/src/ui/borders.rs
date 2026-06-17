@@ -19,7 +19,7 @@ const DIM_VERTICAL: &str = "│";
 const DIM_HORIZONTAL: &str = "─";
 
 /// Renders an animated gradient border if focused, otherwise a dim standard border.
-pub fn render_gradient_border(buf: &mut Buffer, area: Rect, animation_frame: u64, focused: bool) {
+pub fn render_gradient_border(buf: &mut Buffer, area: Rect, animation_frame: u64, focused: bool, is_running: bool) {
     if area.width < 2 || area.height < 2 {
         return;
     }
@@ -33,9 +33,9 @@ pub fn render_gradient_border(buf: &mut Buffer, area: Rect, animation_frame: u64
     let t = animation_frame as f64 * 0.08;
 
     // Corners
-    draw_border_cell(buf, area.x, area.y, area, t, TOP_LEFT);
-    draw_border_cell(buf, area.x + area.width - 1, area.y, area, t, TOP_RIGHT);
-    draw_border_cell(buf, area.x, area.y + area.height - 1, area, t, BOTTOM_LEFT);
+    draw_border_cell(buf, area.x, area.y, area, t, TOP_LEFT, is_running);
+    draw_border_cell(buf, area.x + area.width - 1, area.y, area, t, TOP_RIGHT, is_running);
+    draw_border_cell(buf, area.x, area.y + area.height - 1, area, t, BOTTOM_LEFT, is_running);
     draw_border_cell(
         buf,
         area.x + area.width - 1,
@@ -43,22 +43,23 @@ pub fn render_gradient_border(buf: &mut Buffer, area: Rect, animation_frame: u64
         area,
         t,
         BOTTOM_RIGHT,
+        is_running,
     );
 
     // Top and Bottom
     for x in (area.x + 1)..(area.x + area.width - 1) {
-        draw_border_cell(buf, x, area.y, area, t, HORIZONTAL);
-        draw_border_cell(buf, x, area.y + area.height - 1, area, t, HORIZONTAL);
+        draw_border_cell(buf, x, area.y, area, t, HORIZONTAL, is_running);
+        draw_border_cell(buf, x, area.y + area.height - 1, area, t, HORIZONTAL, is_running);
     }
 
     // Left and Right
     for y in (area.y + 1)..(area.y + area.height - 1) {
-        draw_border_cell(buf, area.x, y, area, t, VERTICAL);
-        draw_border_cell(buf, area.x + area.width - 1, y, area, t, VERTICAL);
+        draw_border_cell(buf, area.x, y, area, t, VERTICAL, is_running);
+        draw_border_cell(buf, area.x + area.width - 1, y, area, t, VERTICAL, is_running);
     }
 }
 
-fn draw_border_cell(buf: &mut Buffer, x: u16, y: u16, area: Rect, t: f64, symbol: &str) {
+fn draw_border_cell(buf: &mut Buffer, x: u16, y: u16, area: Rect, t: f64, symbol: &str, is_running: bool) {
     if x < buf.area.width && y < buf.area.height {
         let cell = &mut buf[(x, y)];
         
@@ -69,7 +70,7 @@ fn draw_border_cell(buf: &mut Buffer, x: u16, y: u16, area: Rect, t: f64, symbol
             cell.set_symbol(symbol);
         }
 
-        let color = get_color(x - area.x, y - area.y, area.width, area.height, t);
+        let color = get_color(x - area.x, y - area.y, area.width, area.height, t, is_running);
         
         // Apply color and reset background/modifiers to prevent artifacts
         cell.fg = color;
@@ -119,7 +120,7 @@ fn calculate_pulse(pos: f64, perimeter: f64, t_scaled: f64, width: f64) -> f64 {
     }
 }
 
-fn get_color(x: u16, y: u16, width: u16, height: u16, t: f64) -> Color {
+fn get_color(x: u16, y: u16, width: u16, height: u16, t: f64, is_running: bool) -> Color {
     let p_pos = get_perimeter_pos(x, y, width, height);
     let w = width.saturating_sub(1) as f64;
     let h = height.saturating_sub(1) as f64;
@@ -130,45 +131,64 @@ fn get_color(x: u16, y: u16, width: u16, height: u16, t: f64) -> Color {
     }
 
     let norm_p = p_pos / perimeter;
+    let mut r: f64;
+    let mut g: f64;
+    let mut b: f64;
 
-    // 1. Base Gradient (Multi-frequency with Chromatic Shift)
-    // We use different speeds for R, G, and B to create a prismatic effect.
-    let r_base = (norm_p * 6.28 + t * 0.5).sin() * 0.5 + 0.5;
-    let g_base = (norm_p * 6.28 + t * 0.65).sin() * 0.5 + 0.5;
-    let b_base = (norm_p * 6.28 + t * 0.8).sin() * 0.5 + 0.5;
+    if is_running {
+        // RUNNING STATE: Intense, complex, highly energetic. Rapid neon pulses, sharp chromatic shifts.
+        
+        let r_base = (norm_p * 20.0 + t * 8.0).sin() * 0.5 + 0.5;
+        let g_base = (norm_p * 25.0 - t * 10.0).sin() * 0.5 + 0.5;
+        let b_base = (norm_p * 15.0 + t * 12.0).sin() * 0.5 + 0.5;
 
-    // Add higher-frequency jitter for organic "aetheric" richness
-    let r_rich = (r_base + (norm_p * 12.5 + t * 1.2).sin() * 0.15) / 1.15;
-    let g_rich = (g_base + (norm_p * 15.0 + t * 1.4).sin() * 0.15) / 1.15;
-    let b_rich = (b_base + (norm_p * 10.0 + t * 1.0).sin() * 0.15) / 1.15;
+        // Traveling Pulses
+        let p1 = calculate_pulse(p_pos, perimeter, t * 30.0, 5.0);
+        let p2 = calculate_pulse(p_pos, perimeter, -t * 20.0, 8.0);
+        let p3 = calculate_pulse(p_pos, perimeter, t * 50.0, 2.0);
+        let p4 = calculate_pulse(p_pos, perimeter, -t * 25.0, 6.0);
 
-    // 2. Traveling Pulses (Bright traveling lights)
-    // Pulse 1: Fast, forward, cyan/white leaning
-    let p1 = calculate_pulse(p_pos, perimeter, t * 12.0, 8.0);
-    // Pulse 2: Slower, backward, magenta leaning
-    let p2 = calculate_pulse(p_pos, perimeter, -t * 6.0, 12.0);
-    // Pulse 3: Very fast, forward, prismatic/white
-    let p3 = calculate_pulse(p_pos, perimeter, t * 25.0, 4.0);
+        let is_corner = (x == 0 || x == width - 1) && (y == 0 || y == height - 1);
+        let flare = if is_corner {
+            ((t * 15.0).sin() * 0.5 + 0.5).powi(2) * 1.2
+        } else {
+            0.0
+        };
 
-    // 3. Corner Flares (Bloom on corners)
-    let is_corner = (x == 0 || x == width - 1) && (y == 0 || y == height - 1);
-    let flare = if is_corner {
-        ((t * 4.0).sin() * 0.5 + 0.5).powi(2) * 0.8
+        r = r_base * 0.1 + p1 * 0.1 + p2 * 1.0 + p3 * 1.0 + p4 * 0.8 + flare;
+        g = g_base * 0.1 + p1 * 0.8 + p2 * 0.2 + p3 * 1.0 + p4 * 1.0 + flare;
+        b = b_base * 0.1 + p1 * 1.0 + p2 * 0.8 + p3 * 1.0 + p4 * 0.1 + flare;
+
+        let flicker = if (t * 30.0).sin() > 0.8 { 1.2 } else { 1.0 };
+        r *= flicker;
+        g *= flicker;
+        b *= flicker;
+
     } else {
-        0.0
-    };
+        // IDLE/FOCUSED STATE: Majestic, calm, ethereal glow. Overlapping sine waves.
+        
+        let phase1 = norm_p * 6.28;
+        let phase2 = norm_p * 12.56;
 
-    // 4. Final Color Composition
-    // Mix the components. Pulses and flares add intensity.
-    let mut r = r_rich * 0.3 + p1 * 0.2 + p2 * 0.8 + p3 * 1.0 + flare;
-    let mut g = g_rich * 0.3 + p1 * 0.8 + p2 * 0.2 + p3 * 1.0 + flare;
-    let mut b = b_rich * 0.3 + p1 * 1.0 + p2 * 0.5 + p3 * 1.0 + flare;
+        let w1 = (phase1 + t * 0.3).sin() * 0.5 + 0.5;
+        let w2 = (phase2 - t * 0.2).cos() * 0.5 + 0.5;
+        let w3 = ((phase1 * 1.5) + t * 0.4).sin() * 0.5 + 0.5;
 
-    // Subtly pulsate overall brightness (Global Shimmer)
-    let shimmer = (t * 1.5).sin() * 0.05 + 0.95;
-    r *= shimmer;
-    g *= shimmer;
-    b *= shimmer;
+        let r_base = 0.1 + w1 * 0.3 + w2 * 0.1;
+        let g_base = 0.2 + w2 * 0.3 + w3 * 0.2;
+        let b_base = 0.4 + w1 * 0.4 + w3 * 0.4;
+
+        let sweep = ((norm_p * 6.28 - t * 0.5).sin() * 0.5 + 0.5).powi(3);
+
+        r = r_base + sweep * 0.15;
+        g = g_base + sweep * 0.3;
+        b = b_base + sweep * 0.4;
+
+        let breath = (t * 0.8).sin() * 0.15 + 0.85;
+        r *= breath;
+        g *= breath;
+        b *= breath;
+    }
 
     // Convert to RGB888 with clamping
     let r_u8 = (r * 255.0).clamp(0.0, 255.0) as u8;

@@ -194,7 +194,7 @@ impl SubagentList {
     }
 
     /// Render the subagent list
-    pub fn render(&self, area: Rect, frame: &mut Frame, animation_frame: u64) {
+    pub fn render(&self, area: Rect, frame: &mut Frame, animation_frame: u64, is_running: bool) {
         let title = format!(" Subagents ({}) ", self.active_count());
         let block = Block::default()
             .title(title)
@@ -206,7 +206,7 @@ impl SubagentList {
             let inner = block.inner(area);
             frame.render_widget(block, area);
             // Render animated gradient border over the block
-            crate::ui::borders::render_gradient_border(frame.buffer_mut(), area, animation_frame, true);
+            crate::ui::borders::render_gradient_border(frame.buffer_mut(), area, animation_frame, true, is_running);
             
             let text = Text::from(Line::from(Span::styled(
                 " No active subagents",
@@ -219,7 +219,7 @@ impl SubagentList {
         let inner = block.inner(area);
         frame.render_widget(block, area);
         // Render animated gradient border over the block
-        crate::ui::borders::render_gradient_border(frame.buffer_mut(), area, animation_frame, true);
+        crate::ui::borders::render_gradient_border(frame.buffer_mut(), area, animation_frame, true, is_running);
 
         // Calculate visible range
         let start = self.scroll as usize;
