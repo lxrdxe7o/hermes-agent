@@ -9,6 +9,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Paragraph},
     Frame,
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::state::config::{ChatColorsRgb, InputMode};
 
@@ -328,6 +329,112 @@ impl InputComposer {
         (line_count + 1).min(max_height).max(1)
     }
     /// Render the composer
+    /// Render the composer without a surrounding block (for use inside an existing block)
+    pub fn render_inner(&self, frame: &mut Frame, area: Rect) {
+        // Build display text
+        let mut lines = Vec::new();
+        let prompt_span = Span::styled(
+            &self.prompt,
+            Style::new().fg(Color::Rgb(102, 217, 239)).bold(),
+        ); // #66D9EF Cyan
+
+        if self.input.is_empty() {
+            // Show placeholder
+            let placeholder = match self.input_mode {
+                InputMode::Normal => "Type your message or /help...",
+                InputMode::Insert => "Insert text...",
+                InputMode::Command => "Enter command...",
+            };
+            lines.push(Line::from(vec![
+                prompt_span,
+                Span::styled(
+                    placeholder,
+                    Style::new().fg(Color::Rgb(117, 113, 94)).italic(),
+                ), // #75715E Gray
+            ]));
+        } else {
+            // Split input into lines and prepend prompt to first line
+            let input_lines: Vec<&str> = self.input.lines().collect();
+            if input_lines.is_empty() {
+                lines.push(Line::from(vec![prompt_span]));
+            } else {
+                for (i, line) in input_lines.iter().enumerate() {
+                    if i == 0 {
+                        lines.push(Line::from(vec![prompt_span.clone(), Span::raw(*line)]));
+                    } else {
+                        // Indent subsequent lines by prompt width
+                        let indent = " ".repeat(self.prompt.width());
+                        lines.push(Line::from(vec![Span::raw(indent), Span::raw(*line)]));
+                    }
+                }
+            }
+        }
+
+        // Create paragraph
+        let paragraph = Paragraph::new(Text::from(lines))
+            .style(Style::new().fg(self.colors.code_text))
+            .wrap(ratatui::widgets::Wrap { trim: false });
+
+        frame.render_widget(paragraph, area);
+
+        // Set cursor position with multi-line support
+        if self.active {
+            let prompt_width = self.prompt.width() as u16;
+            let inner_width = area.width;
+
+            // Find which logical line the cursor is in
+            let input_before = &self.input[..self.cursor_pos.min(self.input.len())];
+            let current_logical_line_idx = input_before.matches('\n').count();
+            let input_lines: Vec<&str> = self.input.lines().collect();
+
+            let mut cursor_y = area.y;
+
+            // Add visual lines for all logical lines before the current one
+            for i in 0..current_logical_line_idx {
+                let line_text = input_lines.get(i).copied().unwrap_or("");
+                let line_width = line_text.width() as u16;
+                let first_line_width = inner_width.saturating_sub(prompt_width);
+
+                if first_line_width > 0 && line_width > first_line_width {
+                    let remaining = line_width - first_line_width;
+                    cursor_y += 1
+                        + (remaining + inner_width - 1)
+                            .checked_div(inner_width)
+                            .unwrap_or(0);
+                } else {
+                    cursor_y += 1;
+                }
+            }
+
+            // Now calculate position within the current logical line
+            let line_start = input_before.rfind('\n').map_or(0, |i| i + 1);
+            let text_in_line = &input_before[line_start..];
+            let col_in_line = text_in_line.width() as u16;
+            let first_line_width = inner_width.saturating_sub(prompt_width);
+
+            let (wrapped_extra, final_col) =
+                if first_line_width > 0 && col_in_line >= first_line_width {
+                    let remaining = col_in_line - first_line_width;
+                    if inner_width > 0 {
+                        (1 + remaining / inner_width, remaining % inner_width)
+                    } else {
+                        (1, 0)
+                    }
+                } else {
+                    (0, prompt_width + col_in_line)
+                };
+
+            cursor_y += wrapped_extra;
+            let cursor_x = area.x + final_col;
+
+            if cursor_x < area.x + area.width
+                && cursor_y < area.y + area.height
+            {
+                frame.set_cursor_position(Position::new(cursor_x, cursor_y));
+            }
+        }
+    }
+
     /// Render the composer without a surrounding block (for the clean footer)
     pub fn render_clean(&self, frame: &mut Frame, area: Rect) {
         let mut lines = Vec::new();
@@ -360,7 +467,7 @@ impl InputComposer {
         };
         lines.push(input_line);
 
-        let line_count = lines.len();
+        let _line_count = lines.len();
         let paragraph =
             Paragraph::new(Text::from(lines)).wrap(ratatui::widgets::Wrap { trim: false });
 
@@ -368,12 +475,64 @@ impl InputComposer {
 
         // Set cursor position
         if self.active {
-            let prompt_len = self.prompt.chars().count();
-            let cursor_x = area.x + (prompt_len + self.cursor_pos) as u16;
-            // The cursor should be on the last line (the input line)
-            let cursor_y = area.y + (line_count as u16).saturating_sub(1);
+            let prompt_width = self.prompt.width() as u16;
+            let inner_width = area.width;
+            
+            // In render_clean, if input is empty, there are 2 welcome lines before the prompt line.
+            // If input is NOT empty, there is only the prompt line (plus any wrapped lines).
+            let welcome_line_count = if self.input.is_empty() { 2 } else { 0 };
 
-            if cursor_x < area.x + area.width {
+            // Find which logical line the cursor is in
+            let input_before = &self.input[..self.cursor_pos.min(self.input.len())];
+            let current_logical_line_idx = input_before.matches('\n').count();
+            let input_lines: Vec<&str> = self.input.lines().collect();
+
+            let mut cursor_y = area.y + welcome_line_count;
+
+            // Add visual lines for all logical lines before the current one
+            for i in 0..current_logical_line_idx {
+                let line_text = input_lines.get(i).copied().unwrap_or("");
+                let line_width = line_text.width() as u16;
+                // In render_clean, prompt is only on the first line of input
+                let current_prompt_width = if i == 0 { prompt_width } else { 0 };
+                let first_line_width = inner_width.saturating_sub(current_prompt_width);
+
+                if first_line_width > 0 && line_width > first_line_width {
+                    let remaining = line_width - first_line_width;
+                    cursor_y += 1
+                        + (remaining + inner_width - 1)
+                            .checked_div(inner_width)
+                            .unwrap_or(0);
+                } else {
+                    cursor_y += 1;
+                }
+            }
+
+            // Now calculate position within the current logical line
+            let line_start = input_before.rfind('\n').map_or(0, |i| i + 1);
+            let text_in_line = &input_before[line_start..];
+            let col_in_line = text_in_line.width() as u16;
+            let current_prompt_width = if current_logical_line_idx == 0 { prompt_width } else { 0 };
+            let first_line_width = inner_width.saturating_sub(current_prompt_width);
+
+            let (wrapped_extra, final_col) =
+                if first_line_width > 0 && col_in_line >= first_line_width {
+                    let remaining = col_in_line - first_line_width;
+                    if inner_width > 0 {
+                        (1 + remaining / inner_width, remaining % inner_width)
+                    } else {
+                        (1, 0)
+                    }
+                } else {
+                    (0, current_prompt_width + col_in_line)
+                };
+
+            cursor_y += wrapped_extra;
+            let cursor_x = area.x + final_col;
+
+            if cursor_x < area.x + area.width
+                && cursor_y < area.y + area.height
+            {
                 frame.set_cursor_position(Position::new(cursor_x, cursor_y));
             }
         }
@@ -426,8 +585,8 @@ impl InputComposer {
                     if i == 0 {
                         lines.push(Line::from(vec![prompt_span.clone(), Span::raw(*line)]));
                     } else {
-                        // Indent subsequent lines by prompt length
-                        let indent = " ".repeat(self.prompt.chars().count());
+                        // Indent subsequent lines by prompt width
+                        let indent = " ".repeat(self.prompt.width());
                         lines.push(Line::from(vec![Span::raw(indent), Span::raw(*line)]));
                     }
                 }
@@ -443,7 +602,7 @@ impl InputComposer {
 
         // Set cursor position with multi-line support
         if self.active {
-            let prompt_len = self.prompt.chars().count() as u16;
+            let prompt_width = self.prompt.width() as u16;
             let inner_width = inner_area.width;
 
             // Find which logical line the cursor is in
@@ -456,11 +615,11 @@ impl InputComposer {
             // Add visual lines for all logical lines before the current one
             for i in 0..current_logical_line_idx {
                 let line_text = input_lines.get(i).copied().unwrap_or("");
-                let line_len = line_text.chars().count() as u16;
-                let first_line_width = inner_width.saturating_sub(prompt_len);
+                let line_width = line_text.width() as u16;
+                let first_line_width = inner_width.saturating_sub(prompt_width);
 
-                if first_line_width > 0 && line_len > first_line_width {
-                    let remaining = line_len - first_line_width;
+                if first_line_width > 0 && line_width > first_line_width {
+                    let remaining = line_width - first_line_width;
                     cursor_y += 1
                         + (remaining + inner_width - 1)
                             .checked_div(inner_width)
@@ -472,8 +631,9 @@ impl InputComposer {
 
             // Now calculate position within the current logical line
             let line_start = input_before.rfind('\n').map_or(0, |i| i + 1);
-            let col_in_line = (self.cursor_pos - line_start) as u16;
-            let first_line_width = inner_width.saturating_sub(prompt_len);
+            let text_in_line = &input_before[line_start..];
+            let col_in_line = text_in_line.width() as u16;
+            let first_line_width = inner_width.saturating_sub(prompt_width);
 
             let (wrapped_extra, final_col) =
                 if first_line_width > 0 && col_in_line >= first_line_width {
@@ -484,7 +644,7 @@ impl InputComposer {
                         (1, 0)
                     }
                 } else {
-                    (0, prompt_len + col_in_line)
+                    (0, prompt_width + col_in_line)
                 };
 
             cursor_y += wrapped_extra;

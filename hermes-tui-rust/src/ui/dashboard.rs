@@ -18,7 +18,7 @@ impl DashboardView {
         use ratatui::layout::{Alignment, Constraint, Direction, Layout};
         use ratatui::style::{Color, Modifier, Style};
         use ratatui::text::{Line, Span};
-        use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph};
+        use ratatui::widgets::{Block, BorderType, Borders, Gauge, Padding, Paragraph};
 
         let time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -30,7 +30,7 @@ impl DashboardView {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(8), // Title
+                Constraint::Length(7), // Title/Banner
                 Constraint::Min(20),   // Content
             ])
             .split(area);
@@ -53,61 +53,35 @@ impl DashboardView {
         }
         let title_para = Paragraph::new(title_lines)
             .alignment(Alignment::Center)
-            .block(Block::default().padding(Padding::new(0, 0, 1, 1)));
+            .block(Block::default().padding(Padding::new(0, 0, 1, 0)));
         frame.render_widget(title_para, chunks[0]);
 
         // Content border
         let content_block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Plain)
+            .border_type(BorderType::Thick)
             .border_style(Style::default().fg(colors.primary.clone().into()))
-            .padding(Padding::new(2, 2, 2, 2));
+            .padding(Padding::new(2, 2, 1, 1));
         let inner_area = content_block.inner(chunks[1]);
         frame.render_widget(content_block, chunks[1]);
-
-        // Header inside content
-        let header_text = Line::from(vec![
-            Span::styled(
-                "Hermes Agent v0.16.0 (2026.6.5) ",
-                Style::default()
-                    .fg(Color::Rgb(250, 189, 47))
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("· ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                "upstream bd16e524",
-                Style::default()
-                    .fg(Color::Rgb(250, 189, 47))
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]);
-        let header_para = Paragraph::new(header_text).alignment(Alignment::Center);
-        frame.render_widget(
-            header_para,
-            Rect {
-                x: inner_area.x,
-                y: inner_area.y,
-                width: inner_area.width,
-                height: 1,
-            },
-        );
 
         let content_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Length(30), // Left column (GIF/Telemetry)
-                Constraint::Min(40),    // Right column (Lists)
+                Constraint::Percentage(30), // Left column (GIF/Telemetry)
+                Constraint::Percentage(70), // Right column (Lists)
             ])
-            .margin(2)
+            .spacing(2)
             .split(inner_area);
 
         // Left Column
         let left_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(12), // GIF
-                Constraint::Length(8),  // Telemetry
+                Constraint::Length(10), // GIF
+                Constraint::Min(10),    // Telemetry
             ])
+            .spacing(1)
             .split(content_chunks[0]);
 
         if let Some(gif_data) = gif {
@@ -117,40 +91,50 @@ impl DashboardView {
         }
 
         // Telemetry
-        let cpu = 10 + (offset * 5);
-        let mem = 40 + offset;
+        let cpu = (10 + (offset * 5)) as u16;
+        let mem = (40 + offset) as u16;
         let net = 200 + (offset * 100);
 
-        let mut tel_lines = Vec::new();
-        tel_lines.push(Line::from(Span::styled(
-            "TELEMETRY",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-        )));
+        let tel_block = Block::default()
+            .title(Span::styled(
+                " TELEMETRY ",
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+            ))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray))
+            .padding(Padding::new(1, 1, 1, 1));
+        
+        let tel_inner = tel_block.inner(left_chunks[1]);
+        frame.render_widget(tel_block, left_chunks[1]);
 
-        let cpu_bar = "█".repeat(cpu / 10) + &"░".repeat(10 - (cpu / 10));
-        tel_lines.push(Line::from(vec![
-            Span::styled("CPU ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                format!("{cpu_bar} "),
-                Style::default().fg(Color::Rgb(131, 165, 152)),
-            ),
-            Span::styled(format!("{cpu}%"), Style::default().fg(Color::Gray)),
-        ]));
+        let tel_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(2), // CPU
+                Constraint::Length(2), // MEM
+                Constraint::Length(2), // NET
+                Constraint::Min(0),
+            ])
+            .spacing(1)
+            .split(tel_inner);
 
-        let mem_bar = "█".repeat(mem / 10) + &"░".repeat(10 - (mem / 10));
-        tel_lines.push(Line::from(vec![
-            Span::styled("MEM ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                format!("{mem_bar} "),
-                Style::default().fg(Color::Rgb(211, 134, 155)),
-            ),
-            Span::styled(format!("{mem}%"), Style::default().fg(Color::Gray)),
-        ]));
+        // CPU Gauge
+        let cpu_gauge = Gauge::default()
+            .block(Block::default().title("CPU Usage"))
+            .gauge_style(Style::default().fg(Color::Rgb(131, 165, 152)).bg(Color::Rgb(40, 40, 40)))
+            .percent(cpu);
+        frame.render_widget(cpu_gauge, tel_layout[0]);
 
+        // MEM Gauge
+        let mem_gauge = Gauge::default()
+            .block(Block::default().title("Memory"))
+            .gauge_style(Style::default().fg(Color::Rgb(211, 134, 155)).bg(Color::Rgb(40, 40, 40)))
+            .percent(mem);
+        frame.render_widget(mem_gauge, tel_layout[1]);
+
+        // NET Info
         let is_streaming = offset % 2 == 0;
-        tel_lines.push(Line::from(vec![
+        let net_text = Line::from(vec![
             Span::styled("NET ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 if is_streaming {
@@ -161,44 +145,33 @@ impl DashboardView {
                 Style::default().fg(Color::Rgb(250, 189, 47)),
             ),
             Span::styled(format!("{net}kb/s"), Style::default().fg(Color::Gray)),
-        ]));
-
-        let tel_para = Paragraph::new(tel_lines).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        );
-        frame.render_widget(tel_para, left_chunks[1]);
+        ]);
+        frame.render_widget(Paragraph::new(net_text), tel_layout[2]);
 
         // Right Column
         let right_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(7), // Available Tools
-                Constraint::Length(3), // MCP Servers
+                Constraint::Length(8), // Available Tools
+                Constraint::Length(4), // MCP Servers
                 Constraint::Min(10),   // Available Skills
             ])
+            .spacing(1)
             .split(content_chunks[1]);
 
         // Available Tools
         let mut tools_lines = Vec::new();
-        tools_lines.push(Line::from(Span::styled(
-            "Available Tools",
-            Style::default()
-                .fg(Color::Rgb(250, 189, 47))
-                .add_modifier(Modifier::BOLD),
-        )));
         tools_lines.push(Line::from(vec![
             Span::styled("browser:       ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                "browser_back, browser_click, ...",
+                "browser_back, browser_click, browser_close, browser_open",
                 Style::default().fg(Color::Gray),
             ),
         ]));
         tools_lines.push(Line::from(vec![
             Span::styled("browser-cdp:   ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                "browser_cdp, browser_dialog",
+                "browser_cdp_call, browser_dialog_accept, browser_dialog_dismiss",
                 Style::default().fg(Color::Gray),
             ),
         ]));
@@ -213,27 +186,23 @@ impl DashboardView {
                 Style::default().fg(Color::Rgb(250, 189, 47)),
             ),
         ]));
-        tools_lines.push(Line::from(vec![
-            Span::styled("computer_use:  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("computer_use", Style::default().fg(Color::Gray)),
-        ]));
         tools_lines.push(Line::from(Span::styled(
             "(and 22 more toolsets...)",
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::ITALIC),
         )));
-        frame.render_widget(Paragraph::new(tools_lines), right_chunks[0]);
+        frame.render_widget(
+            Paragraph::new(tools_lines).block(Block::default().title(Span::styled(
+                " Available Tools ",
+                Style::default().fg(Color::Rgb(250, 189, 47)).add_modifier(Modifier::BOLD),
+            )).borders(Borders::BOTTOM).border_style(Style::default().fg(Color::DarkGray))),
+            right_chunks[0],
+        );
 
         // MCP Servers
         let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][offset % 10];
         let mcp_lines = vec![
-            Line::from(Span::styled(
-                "MCP Servers",
-                Style::default()
-                    .fg(Color::Rgb(250, 189, 47))
-                    .add_modifier(Modifier::BOLD),
-            )),
             Line::from(vec![
                 Span::styled(
                     "playwright (stdio) — ",
@@ -245,16 +214,16 @@ impl DashboardView {
                 ),
             ]),
         ];
-        frame.render_widget(Paragraph::new(mcp_lines), right_chunks[1]);
+        frame.render_widget(
+            Paragraph::new(mcp_lines).block(Block::default().title(Span::styled(
+                " MCP Servers ",
+                Style::default().fg(Color::Rgb(250, 189, 47)).add_modifier(Modifier::BOLD),
+            )).borders(Borders::BOTTOM).border_style(Style::default().fg(Color::DarkGray))),
+            right_chunks[1],
+        );
 
         // Available Skills
         let mut skills_lines = Vec::new();
-        skills_lines.push(Line::from(Span::styled(
-            "Available Skills",
-            Style::default()
-                .fg(Color::Rgb(250, 189, 47))
-                .add_modifier(Modifier::BOLD),
-        )));
         let skills = [
             ("autonomous-ai-agents", "coding-agents, hermes-agent..."),
             ("creative", "architecture-diagram, ascii-art..."),
@@ -269,7 +238,13 @@ impl DashboardView {
                 Span::styled(tools, Style::default().fg(Color::Gray)),
             ]));
         }
-        frame.render_widget(Paragraph::new(skills_lines), right_chunks[2]);
+        frame.render_widget(
+            Paragraph::new(skills_lines).block(Block::default().title(Span::styled(
+                " Available Skills ",
+                Style::default().fg(Color::Rgb(250, 189, 47)).add_modifier(Modifier::BOLD),
+            ))),
+            right_chunks[2],
+        );
     }
 }
 fn time_ms() -> u128 {

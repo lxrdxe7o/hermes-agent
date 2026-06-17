@@ -140,7 +140,7 @@ impl SessionPicker {
     }
 
     /// Render the centered session picker popup
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
+    pub fn render(&self, frame: &mut Frame, area: Rect, animation_frame: u64, current_session_id: Option<&str>) {
         if !self.visible || self.sessions.is_empty() {
             return;
         }
@@ -174,6 +174,12 @@ impl SessionPicker {
             .enumerate()
             .map(|(list_i, &session_i)| {
                 let s = &self.sessions[session_i];
+                let is_active = current_session_id.map_or(false, |id| id == s.id);
+                let is_selected = list_i == self.selected_index;
+                
+                let active_indicator = if is_active { "◈" } else { "◇" };
+                let select_indicator = if is_selected { ">" } else { " " };
+                
                 let formatted_time = chrono::DateTime::from_timestamp(s.started_at, 0)
                     .map_or("Unknown".to_string(), |dt| {
                         dt.format("%Y-%m-%d %H:%M").to_string()
@@ -186,8 +192,8 @@ impl SessionPicker {
                 let source = s.source.as_deref().unwrap_or("cli");
 
                 let line1 = format!(
-                    "{} (msgs: {}, time: {}, source: {})",
-                    title, s.message_count, formatted_time, source
+                    "{} {} {} (msgs: {}, time: {}, source: {})",
+                    select_indicator, active_indicator, title, s.message_count, formatted_time, source
                 );
 
                 // Crop preview to fit inside popup comfortably
@@ -199,7 +205,7 @@ impl SessionPicker {
                     s.preview.clone()
                 };
 
-                let item_style = if list_i == self.selected_index {
+                let item_style = if is_selected {
                     Style::default()
                         .fg(Color::Yellow)
                         .bg(self.colors.user_bg)
@@ -210,7 +216,7 @@ impl SessionPicker {
 
                 let text = vec![
                     ratatui::text::Line::from(line1),
-                    ratatui::text::Line::from(format!("  ↳ {preview}"))
+                    ratatui::text::Line::from(format!("    ↳ {preview}"))
                         .style(Style::default().fg(self.colors.timestamp)),
                 ];
 
@@ -232,6 +238,9 @@ impl SessionPicker {
         let list = List::new(list_items).block(block);
 
         frame.render_widget(list, popup_area);
+
+        // Render animated gradient border over the block
+        crate::ui::borders::render_gradient_border(frame.buffer_mut(), popup_area, animation_frame, true);
     }
 }
 

@@ -95,7 +95,7 @@ impl CompletionPopup {
     }
 
     /// Render the completion popup above the composer area
-    pub fn render(&self, frame: &mut Frame, composer_area: Rect) {
+    pub fn render(&self, frame: &mut Frame, composer_area: Rect, animation_frame: u64) {
         if !self.visible || self.items.is_empty() {
             return;
         }
@@ -122,10 +122,11 @@ impl CompletionPopup {
             .iter()
             .enumerate()
             .map(|(i, item)| {
+                let prefix = if i == self.selected_index { "> " } else { "  " };
                 let text = if let Some(desc) = &item.meta {
-                    format!(" {} - {}", item.display, desc)
+                    format!("{}{}- {}", prefix, item.display, desc)
                 } else {
-                    format!(" {}", item.display)
+                    format!("{}{}", prefix, item.display)
                 };
                 let style = if i == self.selected_index {
                     Style::default()
@@ -147,6 +148,9 @@ impl CompletionPopup {
         let list = List::new(list_items).block(block);
 
         frame.render_widget(list, popup_area);
+
+        // Render animated gradient border over the block
+        crate::ui::borders::render_gradient_border(frame.buffer_mut(), popup_area, animation_frame, true);
     }
 }
 

@@ -3,6 +3,7 @@
 //! This module contains all the UI components for the TUI.
 
 pub mod banner;
+pub mod borders;
 pub mod cards;
 pub mod chat;
 pub mod completions;

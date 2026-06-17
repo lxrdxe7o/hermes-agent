@@ -82,6 +82,9 @@ pub fn draw_sync<F>(
 where
     F: FnOnce(&mut ratatui::Frame),
 {
+    // Hide cursor to prevent ghosting during sync
+    execute!(io::stdout(), crossterm::cursor::Hide)?;
+
     // Begin synchronized update
     execute!(io::stdout(), BeginSynchronizedUpdate)?;
 
@@ -90,6 +93,10 @@ where
 
     // End synchronized update
     execute!(io::stdout(), EndSynchronizedUpdate)?;
+
+    // Show cursor again - Ratatui's Terminal::draw will have set the correct
+    // cursor position if frame.set_cursor_position was called.
+    execute!(io::stdout(), crossterm::cursor::Show)?;
     io::stdout().flush()?;
 
     Ok(())

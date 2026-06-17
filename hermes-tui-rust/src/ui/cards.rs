@@ -7,7 +7,7 @@ use ratatui::{
     layout::Rect,
     style::{Style, Stylize},
     text::{Line, Span, Text},
-    widgets::{Block, BorderType, Borders, Padding, Paragraph, Wrap},
+    widgets::{Block, Padding, Paragraph, Wrap},
     Frame,
 };
 
@@ -118,6 +118,8 @@ pub struct CardComponent {
     expanded: bool,
     /// Animation frame counter for spinner
     spinner_frame: u32,
+    /// Current execution status (for tool cards)
+    status: Option<ToolStatus>,
     /// Colors from configuration
     colors: ChatColorsRgb,
 }
@@ -138,6 +140,7 @@ impl CardComponent {
             tool_name: String::new(),
             expanded: false,
             spinner_frame: 0,
+            status: None,
             colors,
         }
     }
@@ -200,6 +203,7 @@ impl CardComponent {
             tool_name: data.tool_name.clone(),
             expanded: false,
             spinner_frame: 0,
+            status: Some(data.status),
             colors,
         }
     }
@@ -209,6 +213,7 @@ impl CardComponent {
         self.title = Self::tool_card_title(data);
         self.content = Self::tool_card_content(data, self.spinner_frame);
         self.tool_name = data.tool_name.clone();
+        self.status = Some(data.status);
     }
 
     /// Toggle the expanded state of the card
@@ -249,7 +254,7 @@ impl CardComponent {
     /// Build the title for a tool card
     fn tool_card_title(data: &ToolCardData) -> String {
         let status_icon = match data.status {
-            ToolStatus::Running => " ▶ ",
+            ToolStatus::Running => " ◈ ",
             ToolStatus::Completed => " ✓ ",
             ToolStatus::Failed => " ✗ ",
             ToolStatus::Pending => " ○ ",
@@ -372,30 +377,38 @@ impl CardComponent {
     }
 
     /// Render the card
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let border_color = self.border_color();
+    pub fn render(&self, frame: &mut Frame, area: Rect, animation_frame: u64) {
         let is_tool = self.card_type == CardType::Tool;
 
         // Build title with expand/collapse indicator for tool cards
         let title = if is_tool {
-            let indicator = if self.expanded { " ▼ " } else { " ▶ " };
+            let indicator = if self.expanded { " ▼ " } else { " > " };
             format!("{}{}", indicator, self.title)
         } else {
             format!(" {} ", self.title)
         };
 
-        // Create a block for the card
+        // If it's a running tool, we want an animated border
+        let is_running_tool = is_tool && self.status == Some(ToolStatus::Running);
+
+        // Render the gradient border (animated if running)
+        crate::ui::borders::render_gradient_border(frame.buffer_mut(), area, animation_frame, is_running_tool);
+
+        // Create a block for the title and background
+        // We use a block without borders because we've already rendered them
         let block = Block::default()
             .title(title)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::new().fg(border_color))
             .bg(self.bg_color());
 
-        // Inner area
-        let inner_area = block.inner(area);
+        // Inner area (accounting for the border we just drew)
+        let inner_area = Rect {
+            x: area.x + 1,
+            y: area.y + 1,
+            width: area.width.saturating_sub(2),
+            height: area.height.saturating_sub(2),
+        };
 
-        // Render the block
+        // Render the background/title block
         frame.render_widget(block, area);
 
         // Determine what content to show based on expanded state
@@ -425,7 +438,7 @@ impl CardComponent {
         let paragraph = Paragraph::new(content_text)
             .wrap(Wrap { trim: false })
             .style(Style::new().bg(self.bg_color()))
-            .block(Block::new().padding(Padding::new(1, 1, 1, 1)));
+            .block(Block::new().padding(Padding::new(1, 1, 0, 1)));
 
         frame.render_widget(paragraph, inner_area);
     }
@@ -616,7 +629,7 @@ impl CardManager {
     }
 
     /// Render all cards in a stack (vertical layout)
-    pub fn render_stack(&self, frame: &mut Frame, area: Rect) {
+    pub fn render_stack(&self, frame: &mut Frame, area: Rect, animation_frame: u64) {
         if self.cards.is_empty() {
             return;
         }
@@ -631,7 +644,7 @@ impl CardManager {
                 width: area.width,
                 height: card_height,
             };
-            card.render(frame, card_area);
+            card.render(frame, card_area, animation_frame);
         }
     }
 }

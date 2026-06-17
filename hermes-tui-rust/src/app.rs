@@ -16,9 +16,7 @@ use log::{debug, error, info, warn};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
-    widgets::{Block, BorderType},
-    style::Stylize,
+    widgets::Block,
     Terminal,
 };
 use std::io::{self, Stdout, Write};
@@ -99,6 +97,8 @@ pub struct App {
     cursor_position: usize,
     /// Chat component for displaying conversation messages
     chat_component: ChatComponent,
+    /// Chat state for scroll position and selection
+    chat_state: crate::ui::chat::ChatState,
     /// Input composer for user text input
     input_composer: InputComposer,
     /// Prompt manager for approval/clarify/secret overlays
@@ -139,6 +139,10 @@ pub struct App {
     animation_frame: u64,
     /// Sine-wave loading footer ticker (Aetheric Shader, Phase 4)
     wave_ticker: crate::ui::wave::WaveTicker,
+    /// Global aetheric shader state (Phase 4.2)
+    shader_state: crate::ui::effects::ShaderState,
+    /// Last completion query sent to gateway (to deduplicate)
+    last_completion_query: Option<String>,
 }
 
 impl App {
@@ -196,6 +200,7 @@ impl App {
             current_input: String::new(),
             cursor_position: 0,
             chat_component: ChatComponent::new(chat_colors_rgb, true),
+            chat_state: crate::ui::chat::ChatState::default(),
             input_composer,
             toolbar: Toolbar::new(theme_colors_rgb, chat_colors_rgb),
             banner: crate::ui::banner::Banner,
@@ -215,6 +220,8 @@ impl App {
             focus_pane: FocusPane::default(),
             animation_frame: 0,
             wave_ticker: crate::ui::wave::WaveTicker::new(),
+            shader_state: crate::ui::effects::ShaderState::new(),
+            last_completion_query: None,
         })
     }
 
@@ -308,6 +315,17 @@ impl App {
     /// Get a mutable reference to the chat component
     pub fn chat_component_mut(&mut self) -> &mut ChatComponent {
         &mut self.chat_component
+    }
+
+    /// Get a reference to the chat state
+    #[must_use]
+    pub fn chat_state(&self) -> &crate::ui::chat::ChatState {
+        &self.chat_state
+    }
+
+    /// Get a mutable reference to the chat state
+    pub fn chat_state_mut(&mut self) -> &mut crate::ui::chat::ChatState {
+        &mut self.chat_state
     }
 
     /// Get a reference to the input composer
@@ -607,6 +625,7 @@ impl App {
             // Advance or stop the sine-wave loading footer (Phase 4)
             if self.thinking {
                 self.wave_ticker.advance();
+                self.shader_state.advance();
             }
 
             // Increment animation frame for animated borders
@@ -684,7 +703,7 @@ impl App {
             self.reconnect_attempts
         ));
         self.messages_mut().add_message(msg.clone());
-        self.chat_component.add_message(msg, &self.card_manager);
+        self.chat_component.add_message(msg, &mut self.chat_state, &self.card_manager);
 
         // Attempt to reconnect
         if let Err(e) = self.connect_gateway() {
@@ -698,7 +717,7 @@ impl App {
                 let fail_msg = Message::system("Failed to reconnect after multiple attempts. Restart the TUI or press Ctrl+C to exit.");
                 self.messages_mut().add_message(fail_msg.clone());
                 self.chat_component
-                    .add_message(fail_msg, &self.card_manager);
+                    .add_message(fail_msg, &mut self.chat_state, &self.card_manager);
                 self.reconnecting = false;
             }
             // Will try again on next loop iteration
@@ -912,8 +931,8 @@ impl App {
                         let system_message = Message::system(format!("Resuming session: {title}"));
                         self.messages_mut().add_message(system_message.clone());
                         self.chat_component
-                            .add_message(system_message, &self.card_manager);
-                        self.chat_component.scroll_to_bottom(&self.card_manager);
+                            .add_message(system_message, &mut self.chat_state, &self.card_manager);
+                        self.chat_component.scroll_to_bottom(&mut self.chat_state, &self.card_manager);
                         self.session_picker.hide();
                     }
                 }
@@ -941,14 +960,18 @@ impl App {
                     self.model_picker.select_prev();
                 }
                 KeyCode::Enter => {
-                    if self.model_picker.selected_model().is_some() {
+                    if self.model_picker.stage() == crate::ui::model_picker::ModelPickerStage::Model {
                         let _ = self.apply_selected_model();
                     } else {
                         self.model_picker.enter_provider();
                     }
                 }
                 KeyCode::Esc => {
-                    self.model_picker.hide();
+                    if self.model_picker.stage() == crate::ui::model_picker::ModelPickerStage::Model {
+                        self.model_picker.back_to_providers();
+                    } else {
+                        self.model_picker.hide();
+                    }
                 }
                 _ => {}
             }
@@ -958,11 +981,11 @@ impl App {
         // If completion popup is visible, route keys to it
         if self.completion_popup.is_visible() {
             match key.code {
-                KeyCode::Down => {
+                KeyCode::Tab | KeyCode::Down => {
                     self.completion_popup.select_next();
                     return Ok(());
                 }
-                KeyCode::Up => {
+                KeyCode::BackTab | KeyCode::Up => {
                     self.completion_popup.select_prev();
                     return Ok(());
                 }
@@ -970,8 +993,15 @@ impl App {
                     if let Some(item) = self.completion_popup.selected_item().cloned() {
                         let replace_from = self.completion_popup.replace_from().unwrap_or(0);
                         let input = self.input_composer.get_input().to_string();
+                        
+                        // In command mode, we want to strip the leading slash if the item has one
+                        let mut text = item.text.clone();
+                        if self.input_mode == InputMode::Command && text.starts_with('/') {
+                            text.remove(0);
+                        }
+
                         let new_input =
-                            format!("{}{}", &input[..replace_from.min(input.len())], item.text);
+                            format!("{}{}", &input[..replace_from.min(input.len())], text);
                         self.input_composer.set_input(&new_input);
                         self.current_input = new_input;
                         self.completion_popup.hide();
@@ -998,27 +1028,27 @@ impl App {
                     return Ok(());
                 }
                 KeyCode::Char('j') | KeyCode::Down => {
-                    self.chat_component.select_next(&self.card_manager);
+                    self.chat_component.select_next(&mut self.chat_state, &self.card_manager);
                     self.chat_component
-                        .ensure_selected_in_view(&self.card_manager);
+                        .ensure_selected_in_view(&mut self.chat_state, &self.card_manager);
                     return Ok(());
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
-                    self.chat_component.select_prev(&self.card_manager);
+                    self.chat_component.select_prev(&mut self.chat_state, &self.card_manager);
                     self.chat_component
-                        .ensure_selected_in_view(&self.card_manager);
+                        .ensure_selected_in_view(&mut self.chat_state, &self.card_manager);
                     return Ok(());
                 }
                 KeyCode::Enter => {
                     // Toggle expansion for selected message
-                    if let Some(idx) = self.chat_component.get_selected_index() {
+                    if let Some(idx) = self.chat_component.get_selected_index(&self.chat_state) {
                         let msg_id_opt =
                             self.messages().get(idx).and_then(|m| m.message_id.clone());
                         if let Some(msg_id) = &msg_id_opt {
                             if !msg_id.starts_with("subagent:") {
                                 if let Some(msg) = self.messages().get(idx) {
                                     if msg.role == MessageRole::System {
-                                        self.chat_component.toggle_system_expanded(msg_id);
+                                        self.chat_component.toggle_system_expanded(&mut self.chat_state, msg_id);
                                     } else if msg.role == MessageRole::Tool {
                                         self.card_manager.toggle_expanded(msg_id);
                                     }
@@ -1029,11 +1059,11 @@ impl App {
                     return Ok(());
                 }
                 KeyCode::PageUp => {
-                    self.chat_component.scroll_up(10);
+                    self.chat_component.scroll_up(&mut self.chat_state, 10);
                     return Ok(());
                 }
                 KeyCode::PageDown => {
-                    self.chat_component.scroll_down(10, &self.card_manager);
+                    self.chat_component.scroll_down(&mut self.chat_state, 10, &self.card_manager);
                     return Ok(());
                 }
                 _ => {}
@@ -1047,9 +1077,9 @@ impl App {
             // Select the last message
             let len = self.chat_component.messages().len();
             if len > 0 {
-                self.chat_component.select_prev(&self.card_manager);
+                self.chat_component.select_prev(&mut self.chat_state, &self.card_manager);
                 self.chat_component
-                    .ensure_selected_in_view(&self.card_manager);
+                    .ensure_selected_in_view(&mut self.chat_state, &self.card_manager);
             }
             return Ok(());
         }
@@ -1111,17 +1141,27 @@ impl App {
 
         // Pass key to input composer for handling (only in Insert/Command mode)
         if self.input_mode == InputMode::Insert || self.input_mode == InputMode::Command {
+            // Handle Tab for completion
+            if code == KeyCode::Tab {
+                if self.completion_popup.is_visible() {
+                    self.completion_popup.select_next();
+                } else {
+                    self.maybe_request_completion()?;
+                }
+                return Ok(());
+            }
+            if code == KeyCode::BackTab {
+                if self.completion_popup.is_visible() {
+                    self.completion_popup.select_prev();
+                }
+                return Ok(());
+            }
+
             let handled = self.input_composer.handle_key_event(key);
             if handled {
                 self.current_input = self.input_composer.get_input().to_string();
                 self.input_mode = self.input_composer.input_mode();
                 self.maybe_request_completion()?;
-            }
-
-            // Request slash completions while typing in Command mode
-            if self.input_mode == InputMode::Command && handled {
-                let text = self.input_composer.get_input().to_string();
-                let _ = self.send_gateway_request(TuiRequest::CompleteSlash { text });
             }
         }
 
@@ -1139,8 +1179,14 @@ impl App {
         self.input_composer.clear();
 
         // Check if this is a slash command
-        if self.input_mode == InputMode::Command {
-            self.execute_slash_command(input)?;
+        if input.starts_with('/') || self.input_mode == InputMode::Command {
+            // Strip leading slash if present for execute_slash_command
+            let command = if input.starts_with('/') {
+                input[1..].to_string()
+            } else {
+                input
+            };
+            self.execute_slash_command(command)?;
             self.set_input_mode(InputMode::Normal);
             return Ok(());
         }
@@ -1171,9 +1217,9 @@ impl App {
         let user_message = Message::user(message_content);
         self.messages_mut().add_message(user_message.clone());
         self.chat_component
-            .add_message(user_message, &self.card_manager);
+            .add_message(user_message, &mut self.chat_state, &self.card_manager);
         // Auto-scroll to bottom
-        self.chat_component.scroll_to_bottom(&self.card_manager);
+        self.chat_component.scroll_to_bottom(&mut self.chat_state, &self.card_manager);
 
         Ok(())
     }
@@ -1208,8 +1254,8 @@ impl App {
         let user_message = Message::user(format!("/{command_clone}"));
         self.messages_mut().add_message(user_message.clone());
         self.chat_component
-            .add_message(user_message, &self.card_manager);
-        self.chat_component.scroll_to_bottom(&self.card_manager);
+            .add_message(user_message, &mut self.chat_state, &self.card_manager);
+        self.chat_component.scroll_to_bottom(&mut self.chat_state, &self.card_manager);
 
         Ok(())
     }
@@ -1234,8 +1280,8 @@ impl App {
         let system_message = Message::system("Creating new session...");
         self.messages_mut().add_message(system_message.clone());
         self.chat_component
-            .add_message(system_message, &self.card_manager);
-        self.chat_component.scroll_to_bottom(&self.card_manager);
+            .add_message(system_message, &mut self.chat_state, &self.card_manager);
+        self.chat_component.scroll_to_bottom(&mut self.chat_state, &self.card_manager);
 
         Ok(())
     }
@@ -1263,14 +1309,14 @@ impl App {
                 Message::system(format!("Resuming session: {session_name_display}"));
             self.messages_mut().add_message(system_message.clone());
             self.chat_component
-                .add_message(system_message, &self.card_manager);
-            self.chat_component.scroll_to_bottom(&self.card_manager);
+                .add_message(system_message, &mut self.chat_state, &self.card_manager);
+            self.chat_component.scroll_to_bottom(&mut self.chat_state, &self.card_manager);
         } else {
             let system_message = Message::system("No previous sessions to resume");
             self.messages_mut().add_message(system_message.clone());
             self.chat_component
-                .add_message(system_message, &self.card_manager);
-            self.chat_component.scroll_to_bottom(&self.card_manager);
+                .add_message(system_message, &mut self.chat_state, &self.card_manager);
+            self.chat_component.scroll_to_bottom(&mut self.chat_state, &self.card_manager);
         }
 
         Ok(())
@@ -1288,8 +1334,8 @@ impl App {
         let system_message = Message::system("Fetching session list...");
         self.messages_mut().add_message(system_message.clone());
         self.chat_component
-            .add_message(system_message, &self.card_manager);
-        self.chat_component.scroll_to_bottom(&self.card_manager);
+            .add_message(system_message, &mut self.chat_state, &self.card_manager);
+        self.chat_component.scroll_to_bottom(&mut self.chat_state, &self.card_manager);
 
         Ok(())
     }
@@ -1324,9 +1370,9 @@ impl App {
 
         // Route to chat component for scroll
         if mouse.kind == MouseEventKind::ScrollUp {
-            self.chat_component.scroll_up(3);
+            self.chat_component.scroll_up(&mut self.chat_state, 3);
         } else if mouse.kind == MouseEventKind::ScrollDown {
-            self.chat_component.scroll_down(3, &self.card_manager);
+            self.chat_component.scroll_down(&mut self.chat_state, 3, &self.card_manager);
         }
         Ok(())
     }
@@ -1613,7 +1659,7 @@ impl App {
 
         // Clear message history for new session
         self.messages_mut().clear();
-        self.chat_component_mut().clear_messages();
+        self.chat_component.clear_messages(&mut self.chat_state);
 
         Ok(())
     }
@@ -1648,7 +1694,7 @@ impl App {
 
         // Clear existing messages
         self.messages_mut().clear();
-        self.chat_component_mut().clear_messages();
+        self.chat_component.clear_messages(&mut self.chat_state);
 
         // Add resumed messages to chat
         if let Some(messages) = response.messages {
@@ -1675,6 +1721,7 @@ impl App {
         );
 
         self.thinking = true;
+        self.shader_state.trigger_tool_effect();
 
         // Create a tool card for this tool call with proper call_id
         let data = ToolCardData::running(&tool_start.tool_name)
@@ -1689,7 +1736,7 @@ impl App {
         );
         message.message_id = Some(tool_start.call_id.clone());
         self.messages_mut().add_message(message.clone());
-        self.chat_component.add_message(message, &self.card_manager);
+        self.chat_component.add_message(message, &mut self.chat_state, &self.card_manager);
 
         Ok(())
     }
@@ -1779,7 +1826,7 @@ impl App {
                 ),
             );
             self.messages_mut().add_message(message.clone());
-            self.chat_component.add_message(message, &self.card_manager);
+            self.chat_component.add_message(message, &mut self.chat_state, &self.card_manager);
         }
         Ok(())
     }
@@ -1840,6 +1887,7 @@ impl App {
 
     fn handle_message_delta(&mut self, delta: MessageDelta) -> Result<()> {
         debug!("Message delta: text='{}'", delta.text);
+        self.shader_state.trigger_stream_effect();
         let session_id = delta.session_id.clone().unwrap_or_default();
         let message_id = format!("{session_id}:streaming");
         if let Some(last_msg) = self.messages().last() {
@@ -1858,7 +1906,7 @@ impl App {
         let message_clone = message.clone();
         self.messages_mut().add_message(message);
         self.chat_component
-            .add_message(message_clone, &self.card_manager);
+            .add_message(message_clone, &mut self.chat_state, &self.card_manager);
         Ok(())
     }
 
@@ -1867,8 +1915,8 @@ impl App {
         self.thinking = false;
         let message = Message::new(MessageRole::Assistant, complete.text);
         self.messages_mut().add_message(message.clone());
-        self.chat_component.add_message(message, &self.card_manager);
-        self.chat_component.scroll_to_bottom(&self.card_manager);
+        self.chat_component.add_message(message, &mut self.chat_state, &self.card_manager);
+        self.chat_component.scroll_to_bottom(&mut self.chat_state, &self.card_manager);
         Ok(())
     }
     fn handle_approval_request(&mut self, request: ApprovalRequest) -> Result<()> {
@@ -1926,7 +1974,18 @@ impl App {
     fn handle_slash_completion(&mut self, completion: CompletionResponse) -> Result<()> {
         debug!("Slash completion: {:?}", completion.items);
         if let Some(items) = completion.items {
-            self.completion_popup.show(items, completion.replace_from);
+            if !items.is_empty() {
+                // In Command mode, the input buffer doesn't have the leading slash.
+                // If the gateway returned a replace_from, we might need to adjust it.
+                let replace_from = if self.input_mode == InputMode::Command {
+                    completion.replace_from.map(|rf| rf.saturating_sub(1)).unwrap_or(0)
+                } else {
+                    completion.replace_from.unwrap_or(1)
+                };
+                self.completion_popup.show(items, Some(replace_from));
+            } else {
+                self.completion_popup.hide();
+            }
         }
         Ok(())
     }
@@ -1943,7 +2002,22 @@ impl App {
     /// Trigger completion requests when the input matches slash/path prefixes.
     fn maybe_request_completion(&mut self) -> Result<()> {
         let input = self.input_composer.get_input().to_string();
-        if let Some(req) = crate::utils::text::completion_request_for_input(&input) {
+        
+        // In command mode, the input doesn't have a leading slash, but the completion logic
+        // and the gateway expect one.
+        let query = if self.input_mode == InputMode::Command {
+            format!("/{}", input)
+        } else {
+            input
+        };
+
+        // Deduplicate requests to avoid overwhelming the gateway
+        if self.last_completion_query.as_deref() == Some(&query) && self.completion_popup.is_visible() {
+            return Ok(());
+        }
+        self.last_completion_query = Some(query.clone());
+
+        if let Some(req) = crate::utils::text::completion_request_for_input(&query) {
             let tui_req = match req.method {
                 "complete.slash" => TuiRequest::CompleteSlash { text: req.query },
                 "complete.path" => TuiRequest::CompletePath { word: req.query },
@@ -1952,6 +2026,7 @@ impl App {
             self.send_gateway_request(tui_req)?;
         } else if self.completion_popup.is_visible() {
             self.completion_popup.hide();
+            self.last_completion_query = None;
         }
         Ok(())
     }
@@ -1959,6 +2034,7 @@ impl App {
     /// Show the model picker and request provider/model list from gateway
     fn show_model_picker(&mut self) -> Result<()> {
         info!("Showing model picker");
+        self.model_picker.show_loading();
         let _session_id = self
             .sessions()
             .current_session()
@@ -1970,8 +2046,18 @@ impl App {
 
     /// Handle model options response
     fn handle_model_options(&mut self, response: ModelOptionsResponse) -> Result<()> {
+        debug!("Received model options: {:?}", response);
         if let Some(providers) = response.providers {
-            self.model_picker.show(providers);
+            if !providers.is_empty() {
+                info!("Updating model picker with {} providers", providers.len());
+                self.model_picker.show(providers);
+            } else {
+                warn!("Received empty providers list from gateway");
+                self.model_picker.hide();
+            }
+        } else {
+            warn!("Received missing providers list from gateway");
+            self.model_picker.hide();
         }
         Ok(())
     }
@@ -1979,12 +2065,31 @@ impl App {
     /// Apply selected model from picker
     fn apply_selected_model(&mut self) -> Result<()> {
         if let Some(model) = self.model_picker.selected_model() {
+            if model.is_empty() {
+                warn!("Model picker returned an empty model name");
+                return Ok(());
+            }
             info!("Switching model to: {model}");
-            self.send_gateway_request(TuiRequest::ConfigSet {
+            match self.send_gateway_request(TuiRequest::ConfigSet {
                 key: "model".to_string(),
-                value: model,
-            })?;
-            self.model_picker.hide();
+                value: model.clone(),
+            }) {
+                Ok(_) => {
+                    let system_message = Message::system(format!("Model switched to: {model}"));
+                    self.messages_mut().add_message(system_message.clone());
+                    self.chat_component
+                        .add_message(system_message, &mut self.chat_state, &self.card_manager);
+                    self.chat_component.scroll_to_bottom(&mut self.chat_state, &self.card_manager);
+                    self.model_picker.hide();
+                },
+                Err(e) => {
+                    error!("Failed to send config.set request for model switch: {e}");
+                    let error_message = Message::error(format!("Failed to switch model: {e}"));
+                    self.messages_mut().add_message(error_message.clone());
+                    self.chat_component
+                        .add_message(error_message, &mut self.chat_state, &self.card_manager);
+                }
+            }
         }
         Ok(())
     }
@@ -1996,16 +2101,16 @@ impl App {
 
             let message = Message::system(output);
             self.messages_mut().add_message(message.clone());
-            self.chat_component.add_message(message, &self.card_manager);
-            self.chat_component.scroll_to_bottom(&self.card_manager);
+            self.chat_component.add_message(message, &mut self.chat_state, &self.card_manager);
+            self.chat_component.scroll_to_bottom(&mut self.chat_state, &self.card_manager);
         }
         if let Some(warning) = response.warning {
             log::warn!("Slash command warning: {warning}");
 
             let message = Message::system(format!("Warning: {warning}"));
             self.messages_mut().add_message(message.clone());
-            self.chat_component.add_message(message, &self.card_manager);
-            self.chat_component.scroll_to_bottom(&self.card_manager);
+            self.chat_component.add_message(message, &mut self.chat_state, &self.card_manager);
+            self.chat_component.scroll_to_bottom(&mut self.chat_state, &self.card_manager);
         }
         Ok(())
     }
@@ -2036,34 +2141,23 @@ impl App {
         if let Some(details) = error.details {
             log::error!("Details: {details}");
         }
+        
+        // Hide overlays that might be waiting for a response
+        if self.model_picker.is_visible() {
+            self.model_picker.hide();
+        }
+
         Ok(())
     }
 
     /// Sync chat component with message history
     fn sync_chat_with_messages(&mut self) {
         let messages = self.messages().all_messages().clone();
+        let state = &mut self.chat_state;
         self.chat_component
-            .set_messages(messages, &self.card_manager);
+            .set_messages(messages, state, &self.card_manager);
     }
 
-    /// Compute an animated border style for a panel
-    fn animated_border_style(focused: bool, animation_frame: u64, base_color: Color) -> Style {
-        if !focused {
-            return Style::default().fg(base_color);
-        }
-        // Cycle through 6 ANSI colors every 15 frames (~4fps cycling)
-        let cycle = ((animation_frame / 15) % 6) as u8;
-        let color = match cycle {
-            0 => Color::Indexed(1),   // Red
-            1 => Color::Indexed(3),   // Yellow
-            2 => Color::Indexed(2),   // Green
-            3 => Color::Indexed(6),   // Cyan
-            4 => Color::Indexed(4),   // Blue
-            5 => Color::Indexed(5),   // Magenta
-            _ => base_color,
-        };
-        Style::default().fg(color).bold()
-    }
     /// Draw the UI
     pub fn draw(&mut self) -> Result<()> {
         // Update toolbar state before drawing
@@ -2109,34 +2203,37 @@ impl App {
         let activity_height = self.actual_activity_height.round() as u16;
         let n_sessions = self.sessions().len() as u16;
         let session_manager_ptr: *const crate::state::session::SessionManager = self.sessions();
+        let current_session_id = self.sessions().current_session_id().cloned();
 
-        // Use raw pointers for all component references to avoid Rust's borrow checking conflicts
-        // This is safe because terminal.draw is FnOnce (synchronous) and each component is
-        // only accessed from one code path within the closure.
-        let banner_ptr: *const crate::ui::banner::Banner = &self.banner;
-        let card_manager_ptr: *const CardManager = &self.card_manager;
-        let hashline_viewer_ptr: *const HashlineViewer = &self.hashline_viewer;
-        let input_composer_ptr: *const InputComposer = &self.input_composer;
-        let toolbar_ptr: *const Toolbar = &self.toolbar;
-        let session_picker_ptr: *const SessionPicker = &self.session_picker;
-        let model_picker_ptr: *const ModelPicker = &self.model_picker;
-        let prompt_manager_ptr: *const PromptManager = &self.prompt_manager;
-        let completion_popup_ptr: *const CompletionPopup = &self.completion_popup;
-        let config_ptr: *const TuiConfig = &self.config;
-        let subagent_list_ptr: *const SubagentList = &self.subagent_list;
-        let chat_component_ptr: *mut ChatComponent = &mut self.chat_component;
+        // Destructure self to allow disjoint borrows of its fields inside the closure
+        let App {
+            ref mut terminal,
+            ref config,
+            ref banner,
+            ref card_manager,
+            ref hashline_viewer,
+            ref input_composer,
+            ref toolbar,
+            ref session_picker,
+            ref mut model_picker,
+            ref prompt_manager,
+            ref completion_popup,
+            ref subagent_list,
+            ref mut chat_component,
+            ref mut chat_state,
+            ref mut bebop_gif,
+            current_view,
+            focus_pane,
+            animation_frame,
+            ref wave_ticker,
+            shader_state: _,
+            ..
+        } = *self;
 
-        // Extract values needed inside the move closure
-        let current_view = self.current_view;
-        let gif_ptr: *mut Option<crate::ui::gif::AnimatedGif> = &mut self.bebop_gif;
-        let focus_pane = self.focus_pane;
-        let animation_frame = self.animation_frame;
-        let config_snapshot = unsafe { &*config_ptr };
-        let base_border_color: Color = Color::from(config_snapshot.theme.chat.border.clone());
-        let wave_tick = self.wave_ticker.current_tick();
-        let wave_active = self.wave_ticker.is_active();
+        let wave_tick = wave_ticker.current_tick();
+        let wave_active = wave_ticker.is_active();
 
-        crate::engine::draw_sync(&mut self.terminal, move |frame| {
+        crate::engine::draw_sync(terminal, |frame| {
             use ratatui::layout::Alignment;
             use ratatui::style::{Color, Modifier, Style};
             use ratatui::text::{Line, Span};
@@ -2197,18 +2294,15 @@ impl App {
             // ── View-dependent rendering ──
             match current_view {
                 ViewState::Dashboard => {
-                    let gif = unsafe { &mut *gif_ptr };
-                    let config = unsafe { &*config_ptr };
                     crate::ui::dashboard::DashboardView::render(
                         frame,
                         main_area,
-                        gif.as_mut(),
+                        bebop_gif.as_mut(),
                         &config.theme.colors,
                     );
                 }
                 ViewState::Ide => {
                     // IDE: content + composer + toolbar
-                    let config = unsafe { &*config_ptr };
                     let ide_chunks = Layout::default()
                         .direction(Direction::Vertical)
                         .constraints([
@@ -2218,26 +2312,23 @@ impl App {
                         ])
                         .split(main_area);
 
-                    let chat_component = unsafe { &mut *chat_component_ptr };
                     crate::ui::ide::IdeView::render(
                         frame,
                         ide_chunks[0],
                         &config.theme.colors,
                         chat_component,
+                        chat_state,
                         connected,
-                        unsafe { &*card_manager_ptr },
-                        unsafe { &*subagent_list_ptr },
+                        card_manager,
+                        subagent_list,
+                        animation_frame,
                     );
 
-                    let input_composer = unsafe { &*input_composer_ptr };
                     input_composer.render_clean(frame, ide_chunks[1]);
-
-                    let toolbar = unsafe { &*toolbar_ptr };
                     toolbar.render(frame, ide_chunks[2]);
                 }
                 ViewState::Kanban => {
                     // Kanban: content + composer + toolbar
-                    let config = unsafe { &*config_ptr };
                     let kanban_chunks = Layout::default()
                         .direction(Direction::Vertical)
                         .constraints([
@@ -2253,10 +2344,7 @@ impl App {
                         &config.theme.colors,
                     );
 
-                    let input_composer = unsafe { &*input_composer_ptr };
                     input_composer.render_clean(frame, kanban_chunks[1]);
-
-                    let toolbar = unsafe { &*toolbar_ptr };
                     toolbar.render(frame, kanban_chunks[2]);
                 }
                 ViewState::Chat => {
@@ -2278,7 +2366,6 @@ impl App {
                         .split(main_area);
 
                     // Banner
-                    let banner = unsafe { &*banner_ptr };
                     if banner_height > 1 {
                         banner.render(frame, main_layout[0]);
                     } else {
@@ -2286,41 +2373,34 @@ impl App {
                     }
 
                     // Chat with animated border
-                    let chat_component = unsafe { &mut *chat_component_ptr };
                     let chat_area = main_layout[1];
-                    let chat_block = Block::bordered()
-                        .border_type(BorderType::Thick)
-                        .border_style(Self::animated_border_style(focus_pane == FocusPane::Chat, animation_frame, base_border_color));
+                    let chat_block = Block::bordered();
                     let chat_inner = chat_block.inner(chat_area);
                     frame.render_widget(chat_block, chat_area);
-                    chat_component.set_visible_height(chat_inner.height.saturating_sub(2));
+                    crate::ui::borders::render_gradient_border(frame.buffer_mut(), chat_area, animation_frame, focus_pane == FocusPane::Chat);
+                    chat_state.visible_height = chat_inner.height.saturating_sub(2);
                     chat_component.set_show_logo_on_empty(true);
-                    chat_component.render(frame, chat_inner, unsafe { &*card_manager_ptr }, unsafe { &*subagent_list_ptr }, connected);
+                    chat_component.render(frame, chat_inner, chat_state, card_manager, subagent_list, connected, animation_frame);
 
                     // Activity (hashline only - cards are drawn inline in chat)
                     if activity_height > 0 {
-                        let hashline_viewer = unsafe { &*hashline_viewer_ptr };
                         let activity_area = main_layout[2];
                         if let Some(ref block) = hashline_block {
                             hashline_viewer.render(block, activity_area, frame);
                         }
                     }
                     // Composer with animated border
-                    let input_composer = unsafe { &*input_composer_ptr };
-                    let composer_block = Block::bordered()
-                        .border_type(BorderType::Thick)
-                        .border_style(Self::animated_border_style(focus_pane == FocusPane::Composer, animation_frame, base_border_color));
+                    let composer_block = Block::bordered();
                     let composer_inner = composer_block.inner(main_layout[3]);
                     frame.render_widget(composer_block, main_layout[3]);
-                    input_composer.render_clean(frame, composer_inner);
+                    crate::ui::borders::render_gradient_border(frame.buffer_mut(), main_layout[3], animation_frame, focus_pane == FocusPane::Composer);
+                    input_composer.render_inner(frame, composer_inner);
 
                     // Toolbar with animated border
-                    let toolbar = unsafe { &*toolbar_ptr };
-                    let toolbar_block = Block::bordered()
-                        .border_type(BorderType::Thick)
-                        .border_style(Self::animated_border_style(focus_pane == FocusPane::Toolbar, animation_frame, base_border_color));
+                    let toolbar_block = Block::bordered();
                     let toolbar_inner = toolbar_block.inner(main_layout[5]);
                     frame.render_widget(toolbar_block, main_layout[5]);
+                    crate::ui::borders::render_gradient_border(frame.buffer_mut(), main_layout[5], animation_frame, focus_pane == FocusPane::Toolbar);
                     toolbar.render(frame, toolbar_inner);
 
                     // Sine-wave loading footer (Phase 4 — Aetheric Shaders)
@@ -2330,11 +2410,10 @@ impl App {
 
                     // Sidebar with animated border
                     if show_sidebar && sidebar_area.width > 0 {
-                        let sidebar_block = Block::bordered()
-                            .border_type(BorderType::Thick)
-                            .border_style(Self::animated_border_style(focus_pane == FocusPane::Sidebar, animation_frame, base_border_color));
-                        frame.render_widget(&sidebar_block, sidebar_area);
+                        let sidebar_block = Block::bordered();
                         let sidebar_inner = sidebar_block.inner(sidebar_area);
+                        frame.render_widget(sidebar_block, sidebar_area);
+                        crate::ui::borders::render_gradient_border(frame.buffer_mut(), sidebar_area, animation_frame, focus_pane == FocusPane::Sidebar);
                         let sidebar_chunks = Layout::default()
                             .direction(Direction::Vertical)
                             .constraints([
@@ -2344,33 +2423,28 @@ impl App {
                             .split(sidebar_inner);
 
                         // Subagents
-                        let subagent_list = unsafe { &*subagent_list_ptr };
                         let sub_area = sidebar_chunks[0];
                         if !subagent_list.is_empty() {
-                            subagent_list.render(sub_area, frame);
+                            subagent_list.render(sub_area, frame, animation_frame);
                         }
 
                         // Session sidebar
-                        Self::draw_session_sidebar_inner(frame, sidebar_chunks[1], unsafe { &*config_ptr }, session_manager_ptr);
+                        App::draw_session_sidebar_inner(frame, sidebar_chunks[1], config, session_manager_ptr);
                     }
                 }
             }
 
             // ── Overlays (render on top of everything) ──
             let overlay_area = frame.area();
-            let session_picker = unsafe { &*session_picker_ptr };
             if session_picker.is_visible() {
-                session_picker.render(frame, overlay_area);
+                session_picker.render(frame, overlay_area, animation_frame, current_session_id.as_deref());
             }
-            let model_picker = unsafe { &*model_picker_ptr };
             if model_picker.is_visible() {
-                model_picker.render(frame, overlay_area);
+                model_picker.render(frame, overlay_area, animation_frame);
             }
-            let prompt_manager = unsafe { &*prompt_manager_ptr };
             if prompt_manager.has_active_prompt() {
                 prompt_manager.render(frame, overlay_area);
             }
-            let completion_popup = unsafe { &*completion_popup_ptr };
             if completion_popup.is_visible() {
                 // Position near the bottom of the content area
                 let popup_y = content_area.y + content_area.height.saturating_sub(12);
@@ -2380,8 +2454,13 @@ impl App {
                     width: 40.min(area.width),
                     height: 10.min(content_area.height),
                 };
-                completion_popup.render(frame, popup_area);
+                completion_popup.render(frame, popup_area, animation_frame);
             }
+
+            // Apply global aetheric shaders (Phase 4.2)
+            // DISABLED: unsafe transmute is causing buffer corruption (white blocks)
+            // let area = frame.area();
+            // shader_state.apply(frame.buffer_mut(), area);
         })?;
 
         Ok(())
@@ -2500,7 +2579,7 @@ impl App {
         let mut msg = Message::system(format!("Subagent '{}' started: {}", agent_id, event.goal));
         msg.message_id = Some(format!("subagent:{agent_id}"));
         self.messages_mut().add_message(msg.clone());
-        self.chat_component.add_message(msg, &self.card_manager);
+        self.chat_component.add_message(msg, &mut self.chat_state, &self.card_manager);
         Ok(())
     }
 
@@ -2606,6 +2685,7 @@ mod tests {
             current_input: String::new(),
             cursor_position: 0,
             chat_component: ChatComponent::new(chat_colors_rgb, true),
+            chat_state: crate::ui::chat::ChatState::default(),
             input_composer: InputComposer::new(chat_colors_rgb),
             toolbar: Toolbar::new(theme_colors_rgb, chat_colors_rgb),
             banner: crate::ui::banner::Banner::default(),
@@ -2626,6 +2706,8 @@ mod tests {
             focus_pane: FocusPane::default(),
             animation_frame: 0,
             wave_ticker: crate::ui::wave::WaveTicker::new(),
+            shader_state: crate::ui::effects::ShaderState::new(),
+            last_completion_query: None,
         };
     }
 
@@ -2656,6 +2738,7 @@ mod tests {
             current_input: String::new(),
             cursor_position: 0,
             chat_component: ChatComponent::new(chat_colors_rgb, true),
+            chat_state: crate::ui::chat::ChatState::default(),
             input_composer: InputComposer::new(chat_colors_rgb),
             toolbar: Toolbar::new(theme_colors_rgb, chat_colors_rgb),
             banner: crate::ui::banner::Banner::default(),
@@ -2676,6 +2759,8 @@ mod tests {
             focus_pane: FocusPane::default(),
             animation_frame: 0,
             wave_ticker: crate::ui::wave::WaveTicker::new(),
+            shader_state: crate::ui::effects::ShaderState::new(),
+            last_completion_query: None,
         };
         assert!(app.input_composer().get_input().is_empty());
         assert!(app.toolbar().input_mode() == InputMode::Normal);

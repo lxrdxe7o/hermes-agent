@@ -35,6 +35,7 @@ fn effects_enabled() -> bool {
 ///
 /// Uses a shim buffer from `ratatui_core` (the same crate tachyonfx depends on)
 /// to avoid type mismatches with ratatui 0.28's own `Buffer`.
+#[derive(Debug)]
 pub struct ShaderState {
     pub manager: EffectManager<()>,
 }
@@ -97,12 +98,14 @@ impl ShaderState {
     }
 
     /// Apply the current effects to the frame buffer.
-    pub fn apply(&mut self, buf: &mut ratatui_core::buffer::Buffer, area: ratatui_core::layout::Rect) {
+    pub fn apply(&mut self, buf: &mut ratatui::buffer::Buffer, area: ratatui::layout::Rect) {
         if !effects_enabled() || !self.manager.is_running() {
             return;
         }
+        let core_buf: &mut ratatui_core::buffer::Buffer = unsafe { std::mem::transmute(buf) };
+        let core_area: ratatui_core::layout::Rect = unsafe { std::mem::transmute(area) };
         self.manager
-            .process_effects(txfx::Duration::from_millis(16), buf, area);
+            .process_effects(txfx::Duration::from_millis(16), core_buf, core_area);
     }
 }
 

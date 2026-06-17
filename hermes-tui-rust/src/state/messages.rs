@@ -68,6 +68,11 @@ impl Message {
         Self::new(MessageRole::System, content)
     }
 
+    /// Create a new error message (system role)
+    pub fn error(content: impl Into<String>) -> Self {
+        Self::new(MessageRole::System, content)
+    }
+
     /// Create a new tool message
     pub fn tool(content: impl Into<String>, name: impl Into<String>) -> Self {
         Self {

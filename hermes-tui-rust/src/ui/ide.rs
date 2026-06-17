@@ -9,10 +9,12 @@ impl IdeView {
         frame: &mut Frame,
         area: Rect,
         _colors: &ThemeColors,
-        chat_component: &mut ChatComponent,
+        chat_component: &ChatComponent,
+        chat_state: &mut crate::ui::chat::ChatState,
         connected: bool,
         card_manager: &crate::ui::cards::CardManager,
         subagent_list: &crate::ui::subagent::SubagentList,
+        animation_frame: u64,
     ) {
         // TODO: This is a prototype IDE layout matching the React example.
         // The File Tree and Editor/Diff are currently hardcoded mocks.
@@ -22,7 +24,7 @@ impl IdeView {
         use ratatui::layout::{Constraint, Direction, Layout};
         use ratatui::style::{Color, Modifier, Style};
         use ratatui::text::{Line, Span};
-        use ratatui::widgets::{Block, Borders, Padding, Paragraph};
+        use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph};
 
         let time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -35,51 +37,56 @@ impl IdeView {
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Length(25),     // Tree
-                Constraint::Percentage(50), // Editor
-                Constraint::Percentage(50), // Chat
+                Constraint::Percentage(40), // Editor
+                Constraint::Min(40),        // Chat
             ])
+            .spacing(1)
             .split(area);
 
         // 1. File Tree
         let mut tree_lines = Vec::new();
         tree_lines.push(Line::from(Span::styled(
-            "oh-my-pi-core/",
+            " hermes-tui-rust/",
             Style::default()
                 .fg(Color::Gray)
                 .add_modifier(Modifier::BOLD),
         )));
         tree_lines.push(Line::from(Span::styled(
-            "├── .github/",
+            " ├── .gitignore",
             Style::default().fg(Color::DarkGray),
         )));
         tree_lines.push(Line::from(Span::styled(
-            "├── src/",
+            " ├── src/",
             Style::default().fg(Color::DarkGray),
         )));
         tree_lines.push(Line::from(vec![
-            Span::styled("│   ├── ", Style::default().fg(Color::DarkGray)),
-            Span::styled("tools.rs", Style::default().fg(Color::Rgb(250, 189, 47))),
+            Span::styled(" │   ├── ", Style::default().fg(Color::DarkGray)),
+            Span::styled("ui/", Style::default().fg(Color::Rgb(250, 189, 47))),
+        ]));
+        tree_lines.push(Line::from(vec![
+            Span::styled(" │   │   ├── ", Style::default().fg(Color::DarkGray)),
+            Span::styled("ide.rs", Style::default().fg(Color::Rgb(250, 189, 47))),
         ]));
         tree_lines.push(Line::from(Span::styled(
-            "│   ├── llm.rs",
+            " │   └── main.rs",
             Style::default().fg(Color::DarkGray),
         )));
         tree_lines.push(Line::from(Span::styled(
-            "│   └── main.rs",
+            " ├── Cargo.toml",
             Style::default().fg(Color::DarkGray),
         )));
         tree_lines.push(Line::from(Span::styled(
-            "├── Cargo.toml",
-            Style::default().fg(Color::DarkGray),
-        )));
-        tree_lines.push(Line::from(Span::styled(
-            "└── README.md",
+            " └── README.md",
             Style::default().fg(Color::DarkGray),
         )));
 
         let tree_block = Block::default()
-            .title(" TREE ")
+            .title(Span::styled(
+                " TREE ",
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+            ))
             .borders(Borders::ALL)
+            .border_type(BorderType::Plain)
             .border_style(Style::default().fg(Color::DarkGray))
             .padding(Padding::new(1, 1, 1, 1));
         frame.render_widget(Paragraph::new(tree_lines).block(tree_block), chunks[0]);
@@ -87,45 +94,36 @@ impl IdeView {
         // 2. Editor
         let mut diff_lines = Vec::new();
         diff_lines.push(Line::from(Span::styled(
-            " fn execute_tool(req: ToolCall) {",
+            " fn render_ide(frame: &mut Frame, area: Rect) {",
+            Style::default().fg(Color::DarkGray),
+        )));
+        diff_lines.push(Line::from(vec![
+            Span::styled("-    let chunks = Layout::default()", Style::default().fg(Color::Rgb(204, 36, 29))),
+        ]));
+        diff_lines.push(Line::from(vec![
+            Span::styled("+    let chunks = Layout::default()", Style::default().fg(Color::Rgb(184, 187, 38))),
+        ]));
+        diff_lines.push(Line::from(vec![
+            Span::styled("+        .spacing(1)", Style::default().fg(Color::Rgb(184, 187, 38))),
+        ]));
+        diff_lines.push(Line::from(Span::styled(
+            "         .direction(Direction::Horizontal)",
             Style::default().fg(Color::DarkGray),
         )));
         diff_lines.push(Line::from(Span::styled(
-            "-    let mut res = String::new();",
-            Style::default()
-                .fg(Color::Rgb(204, 36, 29))
-                .bg(Color::Rgb(204, 36, 29)),
-        ))); // red background with some opacity? Ratatui doesn't do opacity easily, so just red fg
-        diff_lines.push(Line::from(Span::styled(
-            "-    let mut res = String::new();",
-            Style::default().fg(Color::Rgb(204, 36, 29)),
-        )));
-        diff_lines.push(Line::from(Span::styled(
-            "+    let mut res = ToolOutput::new();",
-            Style::default().fg(Color::Rgb(184, 187, 38)),
-        )));
-        diff_lines.push(Line::from(Span::styled(
-            "     match req.name.as_str() {",
+            "         .constraints([",
             Style::default().fg(Color::DarkGray),
         )));
         diff_lines.push(Line::from(Span::styled(
-            "+        \"read_file\" => {",
-            Style::default().fg(Color::Rgb(184, 187, 38)),
-        )));
-        diff_lines.push(Line::from(Span::styled(
-            "+            res.set_data(fs::read_to_string(&req.args)?);",
-            Style::default().fg(Color::Rgb(184, 187, 38)),
-        )));
-        diff_lines.push(Line::from(Span::styled(
-            "+        }",
-            Style::default().fg(Color::Rgb(184, 187, 38)),
-        )));
-        diff_lines.push(Line::from(Span::styled(
-            "         _ => return Err(Error::UnknownTool),",
+            "             Constraint::Length(25),",
             Style::default().fg(Color::DarkGray),
         )));
         diff_lines.push(Line::from(Span::styled(
-            "     }",
+            "             Constraint::Percentage(40),",
+            Style::default().fg(Color::DarkGray),
+        )));
+        diff_lines.push(Line::from(Span::styled(
+            "         ])",
             Style::default().fg(Color::DarkGray),
         )));
         diff_lines.push(Line::from(Span::styled(
@@ -133,12 +131,19 @@ impl IdeView {
             Style::default().fg(Color::DarkGray),
         )));
 
-        let active_border = if offset % 2 == 0 {
+        let is_active = offset % 2 == 0;
+        let active_border = if is_active {
             Color::Rgb(250, 189, 47)
         } else {
             Color::DarkGray
         };
-        let editor_title = format!(" 📝 src/tools.rs [LSP: Active {spinner}] ");
+        let border_type = if is_active {
+            BorderType::Thick
+        } else {
+            BorderType::Plain
+        };
+
+        let editor_title = format!(" 📝 src/ui/ide.rs [LSP: Active {spinner}] ");
 
         let editor_block = Block::default()
             .title(Span::styled(
@@ -146,6 +151,7 @@ impl IdeView {
                 Style::default().fg(Color::Rgb(250, 189, 47)),
             ))
             .borders(Borders::ALL)
+            .border_type(border_type)
             .border_style(Style::default().fg(active_border))
             .padding(Padding::new(1, 1, 1, 1));
 
@@ -155,16 +161,17 @@ impl IdeView {
         let chat_block = Block::default()
             .title(Span::styled(
                 " CHAT ",
-                Style::default().fg(Color::Rgb(211, 134, 155)),
+                Style::default().fg(Color::Rgb(211, 134, 155)).add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
+            .border_type(BorderType::Plain)
             .border_style(Style::default().fg(Color::DarkGray));
 
         let chat_inner = chat_block.inner(chunks[2]);
         frame.render_widget(chat_block, chunks[2]);
 
-        chat_component.set_visible_height(chat_inner.height.saturating_sub(2));
+        chat_state.visible_height = chat_inner.height.saturating_sub(2);
         chat_component.set_show_logo_on_empty(false);
-        chat_component.render(frame, chat_inner, card_manager, subagent_list, connected);
+        chat_component.render(frame, chat_inner, chat_state, card_manager, subagent_list, connected, animation_frame);
     }
 }
