@@ -88,9 +88,9 @@ def test_fragments_include_bg_segment_when_active():
     cli_obj = _make_cli()
     cli_obj._background_tasks = {"a": _stub_thread(), "b": _stub_thread()}
     cli_obj._status_bar_visible = True
-    # _get_status_bar_fragments asks _get_tui_terminal_width(); stub it wide.
+    # Background indicators now live in the bottom bar
     cli_obj._get_tui_terminal_width = lambda: 120  # type: ignore[method-assign]
-    frags = cli_obj._get_status_bar_fragments()
+    frags = cli_obj._get_status_bar_fragments_bottom()
     rendered = "".join(text for _style, text in frags)
     assert "▶ 2" in rendered
 
@@ -99,7 +99,7 @@ def test_fragments_omit_bg_segment_when_idle():
     cli_obj = _make_cli()
     cli_obj._status_bar_visible = True
     cli_obj._get_tui_terminal_width = lambda: 120  # type: ignore[method-assign]
-    frags = cli_obj._get_status_bar_fragments()
+    frags = cli_obj._get_status_bar_fragments_bottom()
     rendered = "".join(text for _style, text in frags)
     assert "▶" not in rendered
 
@@ -173,19 +173,20 @@ def test_fragments_include_proc_segment_when_active(monkeypatch):
     _patch_process_registry(monkeypatch, 1)
     cli_obj._status_bar_visible = True
     cli_obj._get_tui_terminal_width = lambda: 120  # type: ignore[method-assign]
-    frags = cli_obj._get_status_bar_fragments()
+    # Shell processes (⚙) now live in the bottom bar
+    frags = cli_obj._get_status_bar_fragments_bottom()
     rendered = "".join(text for _style, text in frags)
     assert "⚙ 1" in rendered
 
 
 def test_indicators_independent_agents_and_processes(monkeypatch):
-    """▶ (agent tasks) and ⚙ (shell processes) render side-by-side."""
+    """▶ (agent tasks) and ⚙ (shell processes) render side-by-side in bottom bar."""
     cli_obj = _make_cli()
     cli_obj._background_tasks = {"bg_a": _stub_thread()}
     _patch_process_registry(monkeypatch, 2)
     cli_obj._status_bar_visible = True
     cli_obj._get_tui_terminal_width = lambda: 120  # type: ignore[method-assign]
-    frags = cli_obj._get_status_bar_fragments()
+    frags = cli_obj._get_status_bar_fragments_bottom()
     rendered = "".join(text for _style, text in frags)
     assert "▶ 1" in rendered
     assert "⚙ 2" in rendered

@@ -74,7 +74,7 @@ class TestCLIStatusBar:
             context_length=200_000,
         )
 
-        text = cli_obj._build_status_bar_text(width=120)
+        text = cli_obj._build_status_bar_text(width=160)
 
         assert "claude-sonnet-4-20250514" in text
         assert "12.4K/200K" in text
@@ -251,7 +251,8 @@ class TestCLIStatusBar:
         )
         cli_obj._status_bar_visible = True
 
-        frags = cli_obj._get_status_bar_fragments()
+        # Compressions now live in the bottom status bar line
+        frags = cli_obj._get_status_bar_fragments_bottom()
         frag_texts = [text for _, text in frags]
 
         assert "🗜️ 7" in frag_texts
@@ -271,10 +272,14 @@ class TestCLIStatusBar:
         )
         cli_obj._status_bar_visible = True
 
+        # Check both top and bottom bars are clean
         frags = cli_obj._get_status_bar_fragments()
         frag_texts = [text for _, text in frags]
-
         assert not any("🗜️" in t for t in frag_texts)
+
+        bottom_frags = cli_obj._get_status_bar_fragments_bottom()
+        bottom_texts = [text for _, text in bottom_frags]
+        assert not any("🗜️" in t for t in bottom_texts)
 
     def test_minimal_tui_chrome_threshold(self):
         cli_obj = _make_cli()
