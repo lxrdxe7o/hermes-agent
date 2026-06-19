@@ -103,6 +103,8 @@ pub struct App {
     chat_component: ChatComponent,
     /// Chat state for scroll position and selection
     chat_state: crate::ui::chat::ChatState,
+    /// IDE state for file tree and editor
+    ide_state: crate::ui::ide::IdeState,
     /// Input composer for user text input
     input_composer: InputComposer,
     /// Prompt manager for approval/clarify/secret overlays
@@ -137,6 +139,22 @@ pub struct App {
     bebop_gif: Option<crate::ui::gif::AnimatedGif>,
     /// Current view (Dashboard, IDE, Kanban, Chat)
     current_view: ViewState,
+    /// Previous view (for transition animations)
+    previous_view: Option<ViewState>,
+    /// Transition progress (0.0 to 1.0)
+    transition_progress: f32,
+    /// System telemetry
+    sys: sysinfo::System,
+    /// Cached CPU usage percentage
+    cpu_usage: f32,
+    /// Cached memory usage percentage
+    memory_usage: f32,
+    /// History of CPU usage for sparkline
+    cpu_history: Vec<u64>,
+    /// History of memory usage for sparkline
+    memory_history: Vec<u64>,
+    /// History of token generation speeds (for sparkline)
+    token_speed_history: Vec<u64>,
     /// Currently focused pane for keyboard navigation
     focus_pane: FocusPane,
     /// Global animation frame counter for animated borders
@@ -144,7 +162,9 @@ pub struct App {
     /// Sine-wave loading footer ticker (Aetheric Shader, Phase 4)
     wave_ticker: crate::ui::wave::WaveTicker,
     /// Global aetheric shader state (Phase 4.2)
-    shader_state: crate::ui::effects::ShaderState,
+    effects: crate::ui::effects::EffectManager,
+    /// Last frame time (for smooth animation delta)
+    last_frame_time: std::time::Instant,
     /// Clipboard backend (arboard or OSC 52 fallback).
     clipboard: Box<dyn Clipboard>,
     /// Gateway-reported capabilities for the empty-state landing page.
@@ -220,6 +240,7 @@ impl App {
             cursor_position: 0,
             chat_component: ChatComponent::new(chat_colors_rgb.clone(), true),
             chat_state: crate::ui::chat::ChatState::default(),
+            ide_state: crate::ui::ide::IdeState::default(),
             input_composer,
             toolbar: Toolbar::new(theme_colors_rgb, chat_colors_rgb.clone()),
             banner: crate::ui::banner::Banner,
@@ -232,14 +253,23 @@ impl App {
             model_picker: ModelPicker::new(chat_colors_rgb.clone()),
             session_picker: SessionPicker::new(chat_colors_rgb.clone()),
             mouse_context: MouseContext::new(),
-            current_model: None,
             current_provider: None,
+            current_model: None,
             bebop_gif: crate::ui::gif::AnimatedGif::new(include_bytes!("../bebop.gif"), 100).ok(),
             current_view: ViewState::Dashboard,
+            previous_view: None,
+            transition_progress: 1.0,
+            sys: sysinfo::System::new_all(),
+            cpu_usage: 0.0,
+            memory_usage: 0.0,
+            cpu_history: Vec::with_capacity(500),
+            memory_history: Vec::with_capacity(500),
+            token_speed_history: Vec::with_capacity(500),
             focus_pane: FocusPane::default(),
             animation_frame: 0,
             wave_ticker: crate::ui::wave::WaveTicker::new(),
-            shader_state: crate::ui::effects::ShaderState::new(),
+            effects: crate::ui::effects::EffectManager::new(),
+            last_frame_time: std::time::Instant::now(),
             clipboard: Self::make_clipboard(),
             capabilities: Capabilities::default(),
             last_completion_query: None,
@@ -681,6 +711,11 @@ impl App {
             // Advance spinner animations for tool cards
             self.card_manager.tick_spinners();
 
+            // Periodically refresh telemetry (approx. once per second at 60 FPS)
+            if self.animation_frame % 60 == 0 {
+                self.refresh_system_stats();
+            }
+
             // Update toolbar animation
             self.toolbar.tick(self.thinking);
             // Sync prefix mode state to the toolbar indicator
@@ -689,7 +724,7 @@ impl App {
             // Advance or stop the sine-wave loading footer (Phase 4)
             if self.thinking {
                 self.wave_ticker.advance();
-                self.shader_state.advance();
+                self.effects.advance();
             }
 
             // Increment animation frame for animated borders
@@ -822,16 +857,16 @@ impl App {
                     self.show_help = !self.show_help;
                 }
                 KeyCode::Char('1') => {
-                    self.current_view = ViewState::Dashboard;
+                    self.switch_view(ViewState::Dashboard);
                 }
                 KeyCode::Char('2') => {
-                    self.current_view = ViewState::Ide;
+                    self.switch_view(ViewState::Ide);
                 }
                 KeyCode::Char('3') => {
-                    self.current_view = ViewState::Kanban;
+                    self.switch_view(ViewState::Kanban);
                 }
                 KeyCode::Char('4') => {
-                    self.current_view = ViewState::Chat;
+                    self.switch_view(ViewState::Chat);
                 }
                 // Tmux-style pane navigation: h/j/k/l
                 KeyCode::Char('h') => {
@@ -1193,6 +1228,49 @@ impl App {
         let KeyEvent {
             code, modifiers, ..
         } = key;
+
+        // IDE view key handling
+        if self.current_view == ViewState::Ide && self.input_mode == InputMode::Normal {
+            match code {
+                KeyCode::Tab => {
+                    self.ide_state.focus_tree = !self.ide_state.focus_tree;
+                    return Ok(());
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if self.ide_state.focus_tree {
+                        self.ide_state.file_tree.next();
+                    } else {
+                        self.ide_state.editor.textarea.input(key);
+                    }
+                    return Ok(());
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if self.ide_state.focus_tree {
+                        self.ide_state.file_tree.previous();
+                    } else {
+                        self.ide_state.editor.textarea.input(key);
+                    }
+                    return Ok(());
+                }
+                KeyCode::Enter => {
+                    if self.ide_state.focus_tree {
+                        if let Some(path) = self.ide_state.file_tree.selected_path() {
+                            if path.is_file() {
+                                self.ide_state.editor.load_file(path);
+                            }
+                        }
+                    }
+                    return Ok(());
+                }
+                _ => {
+                    if !self.ide_state.focus_tree {
+                        self.ide_state.editor.textarea.input(key);
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
         // Normal mode navigation (only in Normal mode)
         if self.input_mode == InputMode::Normal {
             match code {
@@ -1262,6 +1340,10 @@ impl App {
                     // Jump to bottom of chat (and clear the "↓ N new" pill)
                     self.chat_component
                         .jump_to_bottom(&mut self.chat_state, &self.card_manager);
+                    return Ok(());
+                }
+                KeyCode::Char('?') => {
+                    self.show_help = !self.show_help;
                     return Ok(());
                 }
                 _ => {}
@@ -2130,7 +2212,7 @@ impl App {
         );
 
         self.thinking = true;
-        self.shader_state.trigger_tool_effect();
+        self.effects.trigger_tool_effect();
 
         // Create a tool card for this tool call with proper call_id
         let data = ToolCardData::running(&tool_start.tool_name)
@@ -2308,7 +2390,7 @@ impl App {
 
     fn handle_message_delta(&mut self, delta: MessageDelta) -> Result<()> {
         debug!("Message delta: text='{}'", delta.text);
-        self.shader_state.trigger_stream_effect();
+        self.effects.trigger_stream_effect();
         let session_id = delta.session_id.clone().unwrap_or_default();
         let message_id = format!("{session_id}:streaming");
         // Track the streaming message_id for reasoning updates and reset the
@@ -2419,6 +2501,7 @@ impl App {
             return;
         }
         let reasoning_snapshot = self.streaming_reasoning.clone();
+        self.effects.trigger_stream_effect();
         // 1) Update the messages history.
         if let Some(idx) = self
             .messages()
@@ -2657,6 +2740,54 @@ impl App {
         Ok(())
     }
 
+    /// Refresh system telemetry stats
+    fn refresh_system_stats(&mut self) {
+        self.sys.refresh_cpu_usage();
+        self.sys.refresh_memory();
+
+        // Calculate CPU usage as global average
+        self.cpu_usage = self.sys.global_cpu_usage();
+        self.cpu_history.push(self.cpu_usage as u64);
+        if self.cpu_history.len() > 1000 {
+            self.cpu_history.remove(0);
+        }
+
+        // Calculate memory usage percentage
+        let used = self.sys.used_memory();
+        let total = self.sys.total_memory();
+        if total > 0 {
+            self.memory_usage = (used as f32 / total as f32) * 100.0;
+            self.memory_history.push(self.memory_usage as u64);
+            if self.memory_history.len() > 1000 {
+                self.memory_history.remove(0);
+            }
+        }
+
+        // Update token speed history (mock for now)
+        let speed = if self.thinking {
+            // Random-ish speed when thinking
+            (self.animation_frame % 50) + 20
+        } else {
+            0
+        };
+        self.token_speed_history.push(speed);
+        if self.token_speed_history.len() > 1000 {
+            self.token_speed_history.remove(0);
+        }
+    }
+
+    /// Switch to a new view with transition animation
+    fn switch_view(&mut self, new_view: ViewState) {
+        if self.current_view != new_view {
+            self.previous_view = Some(self.current_view);
+            self.current_view = new_view;
+            self.transition_progress = 0.0;
+            self.effects.trigger_view_transition();
+            crate::engine::animation_start();
+            info!("Switched view to {:?}", new_view);
+        }
+    }
+
     /// Handle config get response
     fn handle_config_get(&mut self, _response: ConfigGetResponse) -> Result<()> {
         debug!("Config get response");
@@ -2763,17 +2894,35 @@ impl App {
             ref subagent_list,
             ref mut chat_component,
             ref mut chat_state,
+            ref mut ide_state,
             ref mut bebop_gif,
             current_view,
+            previous_view: _,
+            ref mut transition_progress,
+            cpu_usage,
+            memory_usage,
             focus_pane,
             animation_frame,
             ref wave_ticker,
-            shader_state: _,
+            ref mut effects,
             ..
         } = *self;
 
+        // Advance transition progress
+        if *transition_progress < 1.0 {
+            *transition_progress += 0.33; // ~3 frames for total transition
+            if *transition_progress >= 1.0 {
+                *transition_progress = 1.0;
+                crate::engine::animation_end();
+            }
+        }
+
         let wave_tick = wave_ticker.current_tick();
         let wave_active = wave_ticker.is_active();
+
+        let delta = self.last_frame_time.elapsed();
+        self.last_frame_time = std::time::Instant::now();
+        let delta_ms = delta.as_millis() as u64;
 
         crate::engine::draw_sync(terminal, |frame| {
             use ratatui::layout::Alignment;
@@ -2843,6 +2992,11 @@ impl App {
                         &config.theme.colors,
                         animation_frame,
                         self.thinking,
+                        cpu_usage,
+                        memory_usage,
+                        &self.cpu_history,
+                        &self.memory_history,
+                        &self.token_speed_history,
                     );
                 }
                 ViewState::Ide => {
@@ -2862,6 +3016,7 @@ impl App {
                         &config.theme.colors,
                         chat_component,
                         chat_state,
+                        ide_state,
                         connected,
                         card_manager,
                         subagent_list,
@@ -3060,13 +3215,12 @@ impl App {
 
             // Show help overlay (tmux-style help screen)
             if self.show_help {
-                crate::ui::help::HelpOverlay::render(frame, overlay_area);
+                crate::ui::help::HelpView::render(frame, overlay_area);
             }
 
             // Apply global aetheric shaders (Phase 4.2)
-            // DISABLED: unsafe transmute is causing buffer corruption (white blocks)
-            // let area = frame.area();
-            // shader_state.apply(frame.buffer_mut(), area);
+            let area = frame.area();
+            effects.apply(frame.buffer_mut(), area, delta_ms);
         })?;
 
         Ok(())
@@ -3391,6 +3545,7 @@ mod tests {
             cursor_position: 0,
             chat_component: ChatComponent::new(chat_colors_rgb.clone(), true),
             chat_state: crate::ui::chat::ChatState::default(),
+            ide_state: crate::ui::ide::IdeState::default(),
             input_composer: InputComposer::new(chat_colors_rgb.clone()),
             toolbar: Toolbar::new(theme_colors_rgb, chat_colors_rgb.clone()),
             banner: crate::ui::banner::Banner::default(),
@@ -3408,10 +3563,19 @@ mod tests {
             current_provider: None,
             bebop_gif: None,
             current_view: ViewState::Dashboard,
+            previous_view: None,
+            transition_progress: 1.0,
+            sys: sysinfo::System::new_all(),
+            cpu_usage: 0.0,
+            memory_usage: 0.0,
+            cpu_history: Vec::with_capacity(500),
+            memory_history: Vec::with_capacity(500),
+            token_speed_history: Vec::with_capacity(500),
             focus_pane: FocusPane::default(),
             animation_frame: 0,
             wave_ticker: crate::ui::wave::WaveTicker::new(),
-            shader_state: crate::ui::effects::ShaderState::new(),
+            effects: crate::ui::effects::EffectManager::new(),
+            last_frame_time: std::time::Instant::now(),
             clipboard: Box::new(crate::utils::clipboard::MockClipboard::new()),
             capabilities: Capabilities::default(),
             last_completion_query: None,
@@ -3450,6 +3614,7 @@ mod tests {
             cursor_position: 0,
             chat_component: ChatComponent::new(chat_colors_rgb.clone(), true),
             chat_state: crate::ui::chat::ChatState::default(),
+            ide_state: crate::ui::ide::IdeState::default(),
             input_composer: InputComposer::new(chat_colors_rgb.clone()),
             toolbar: Toolbar::new(theme_colors_rgb, chat_colors_rgb.clone()),
             banner: crate::ui::banner::Banner::default(),
@@ -3467,10 +3632,19 @@ mod tests {
             current_provider: None,
             bebop_gif: None,
             current_view: ViewState::Dashboard,
+            previous_view: None,
+            transition_progress: 1.0,
+            sys: sysinfo::System::new_all(),
+            cpu_usage: 0.0,
+            memory_usage: 0.0,
+            cpu_history: Vec::with_capacity(500),
+            memory_history: Vec::with_capacity(500),
+            token_speed_history: Vec::with_capacity(500),
             focus_pane: FocusPane::default(),
             animation_frame: 0,
             wave_ticker: crate::ui::wave::WaveTicker::new(),
-            shader_state: crate::ui::effects::ShaderState::new(),
+            effects: crate::ui::effects::EffectManager::new(),
+            last_frame_time: std::time::Instant::now(),
             clipboard: Box::new(crate::utils::clipboard::MockClipboard::new()),
             capabilities: Capabilities::default(),
             last_completion_query: None,

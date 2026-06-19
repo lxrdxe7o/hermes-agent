@@ -841,7 +841,7 @@ def _run_chrome_fallback_command(
             hint = (
                 "Chrome fallback requires Chromium, but it is missing. Install it with: "
                 "npx agent-browser install --with-deps "
-                "(or: npx playwright install --with-deps chromium)"
+                "(or: python -m playwright install --with-deps chromium)"
             )
         return {"success": False, "error": hint}
 
@@ -1945,7 +1945,7 @@ def _run_browser_command(
             hint = (
                 "Chromium browser is missing. Install it with: "
                 "npx agent-browser install --with-deps "
-                "(or: npx playwright install --with-deps chromium)"
+                "(or: python -m playwright install --with-deps chromium)"
             )
         logger.warning("browser command blocked: %s", hint)
         return {"success": False, "error": hint}
@@ -3782,7 +3782,7 @@ if __name__ == "__main__":
                 else:
                     print("     Install it with:")
                     print("       npx agent-browser install --with-deps")
-                    print("     Or:  npx playwright install --with-deps chromium")
+                    print("     Or:  python -m playwright install --with-deps chromium")
         except FileNotFoundError:
             print("   - agent-browser CLI not found")
             print(f"     Install: {_browser_install_hint()}")

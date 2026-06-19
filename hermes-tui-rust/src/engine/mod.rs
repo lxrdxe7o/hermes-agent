@@ -37,14 +37,20 @@ pub static ACTIVE_ANIMATIONS: AtomicU64 = AtomicU64::new(0);
 #[inline]
 pub fn animation_start() {
     ACTIVE_ANIMATIONS.fetch_add(1, Ordering::Relaxed);
-    trace!("ACTIVE_ANIMATIONS ↑ {}", ACTIVE_ANIMATIONS.load(Ordering::Relaxed));
+    trace!(
+        "ACTIVE_ANIMATIONS ↑ {}",
+        ACTIVE_ANIMATIONS.load(Ordering::Relaxed)
+    );
 }
 
 /// Stop tracking an animation.
 #[inline]
 pub fn animation_end() {
     ACTIVE_ANIMATIONS.fetch_sub(1, Ordering::Relaxed);
-    trace!("ACTIVE_ANIMATIONS ↓ {}", ACTIVE_ANIMATIONS.load(Ordering::Relaxed));
+    trace!(
+        "ACTIVE_ANIMATIONS ↓ {}",
+        ACTIVE_ANIMATIONS.load(Ordering::Relaxed)
+    );
 }
 
 /// Query the best poll timeout for the event loop.
@@ -75,10 +81,7 @@ pub fn poll_timeout() -> Duration {
 ///
 /// ## Fallback
 /// Terminals that do not support DEC 2026 silently ignore the escape codes.
-pub fn draw_sync<F>(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    draw_fn: F,
-) -> Result<()>
+pub fn draw_sync<F>(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, draw_fn: F) -> Result<()>
 where
     F: FnOnce(&mut ratatui::Frame),
 {

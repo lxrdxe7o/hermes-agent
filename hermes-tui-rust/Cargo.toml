@@ -16,7 +16,7 @@ categories = ["command-line-utilities", "development-tools"]
 # TUI Framework (stable, well-maintained)
 ratatui = { version = "0.28", features = ["all-widgets", "crossterm"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
-tui-textarea = "0.4"  # Multi-line text input
+tui-textarea = "0.6"  # Multi-line text input
 
 # JSON parsing
 serde = { version = "1.0", features = ["derive"] }
@@ -72,6 +72,7 @@ unicode-width = "0.1"
 
 # For clipboard support (optional)
 arboard = { version = "3.0", optional = true }
+sysinfo = "0.31.0"
 
 [features]
 default = ["clipboard-support"]

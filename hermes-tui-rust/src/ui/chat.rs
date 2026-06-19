@@ -202,14 +202,30 @@ impl ChatComponent {
         }
 
         let is_user = message.role == MessageRole::User;
+        let is_streaming_assistant =
+            message.role == MessageRole::Assistant && message.is_streaming();
+
         // User messages have border padding (2) + spacing (1) = 3 extra lines
-        // Non-user gutter layout has just spacing (1) extra line
-        let content_width = if is_user {
+        // Assistant streaming also has a border.
+        let mut content_width = if is_user {
             inner_width.saturating_sub(2).max(10) as usize
         } else {
             inner_width.saturating_sub(4).max(6) as usize
         };
+
+        if is_streaming_assistant {
+            content_width = content_width.saturating_sub(2).max(4);
+        }
+
         let mut total_wrapped_lines = 0u16;
+
+        // Add reasoning height if present
+        if let Some(reasoning) = &message.reasoning {
+            let r_width = content_width.saturating_sub(2).max(4);
+            let wrapped = crate::utils::text::wrap_display_cells(reasoning, r_width);
+            total_wrapped_lines += (wrapped.len() + 2) as u16; // 2 for borders
+            total_wrapped_lines += 1; // Spacing after reasoning block
+        }
 
         for line in message.content.lines() {
             if line.is_empty() {
@@ -223,11 +239,19 @@ impl ChatComponent {
             }
         }
 
+        // Add warning height if present
+        if let Some(warning) = &message.warning {
+            total_wrapped_lines += 1; // Blank line before warning
+            let line_cells = crate::utils::text::display_width(&format!(" ⚠️ Warning: {warning}"));
+            let wrapped = ((line_cells as f64) / (content_width as f64)).ceil() as u16;
+            total_wrapped_lines += wrapped.max(1);
+        }
+
         if total_wrapped_lines == 0 && message.is_streaming() {
             total_wrapped_lines = 1;
         }
 
-        if is_user {
+        if is_user || (message.role == MessageRole::Assistant && message.is_streaming()) {
             total_wrapped_lines + 3 // 2 borders + 1 spacing
         } else {
             total_wrapped_lines + 1 // 1 spacing between messages
@@ -853,9 +877,48 @@ impl ChatComponent {
 
             // Content area to the right of gutter (and accent bar if selected)
             let gutter_offset = if is_selected { 6 } else { 4 };
-            let content_width = area.width.saturating_sub(gutter_offset);
+            let mut content_width = area.width.saturating_sub(gutter_offset);
             let content_x_offset = if is_selected { 5 } else { 3 };
-            let content_area = Rect::new(
+
+            // Add reasoning block if present (Phase 4 DSL extensions)
+            if let Some(reasoning) = &message.reasoning {
+                let r_width = content_width.saturating_sub(2).max(4);
+                let r_lines =
+                    crate::utils::markdown::render_markdown(reasoning, &self.colors, r_width);
+                let r_height = (r_lines.len() + 2) as u16;
+                let r_rect = Rect {
+                    x: area.x + content_x_offset,
+                    y,
+                    width: content_width,
+                    height: r_height.min(remaining_height),
+                };
+
+                let r_block = Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(self.colors.accent_reasoning).dim())
+                    .title(Line::from(vec![Span::styled(
+                        " 🧠 Reasoning ",
+                        Style::default().fg(self.colors.accent_reasoning).bold(),
+                    )]));
+
+                let r_para = Paragraph::new(Text::from(r_lines))
+                    .block(r_block)
+                    .wrap(ratatui::widgets::Wrap { trim: false });
+
+                frame.render_widget(r_para, r_rect);
+
+                let consumed = r_height.min(remaining_height);
+                y += consumed;
+                remaining_height = remaining_height.saturating_sub(consumed);
+
+                if remaining_height > 0 {
+                    y += 1;
+                    remaining_height = remaining_height.saturating_sub(1);
+                }
+            }
+
+            let mut content_area = Rect::new(
                 area.x + content_x_offset,
                 y,
                 content_width,
@@ -892,6 +955,26 @@ impl ChatComponent {
                 }
             }
 
+            // Animated border for streaming assistant messages
+            if message.role == MessageRole::Assistant && message.is_streaming() {
+                let border_block = Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(self.colors.assistant_text).dim());
+
+                frame.render_widget(border_block.clone(), content_area);
+                crate::ui::borders::render_gradient_border(
+                    frame.buffer_mut(),
+                    content_area,
+                    animation_frame,
+                    true,
+                    true,
+                );
+
+                content_area = border_block.inner(content_area);
+                content_width = content_area.width;
+            }
+
             // Get message content, possibly truncated for system messages
             let display_content = if message.role == MessageRole::System
                 && message.content.chars().count() > 400
@@ -912,24 +995,6 @@ impl ChatComponent {
                 ..message.clone()
             };
             let mut lines = self.render_message_content(&temp_msg, content_width);
-
-            // Add reasoning if present (Phase 4 DSL extensions)
-            if let Some(reasoning) = &message.reasoning {
-                lines.insert(
-                    0,
-                    Line::from(vec![
-                        Span::styled(
-                            " 🧠 Reasoning: ",
-                            Style::default().fg(self.colors.accent_reasoning).italic(),
-                        ),
-                        Span::styled(
-                            reasoning,
-                            Style::default().fg(self.colors.timestamp).italic(),
-                        ),
-                    ]),
-                );
-                lines.insert(1, Line::from(""));
-            }
 
             // Add warning if present
             if let Some(warning) = &message.warning {

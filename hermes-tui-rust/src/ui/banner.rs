@@ -72,10 +72,7 @@ impl Banner {
         let mut shadow_lines: Vec<Line> = Vec::new();
         for (i, text) in logo_lines.iter().enumerate() {
             let color = shadow_colors[i % shadow_colors.len()];
-            shadow_lines.push(Line::from(Span::styled(
-                *text,
-                Style::default().fg(color),
-            )));
+            shadow_lines.push(Line::from(Span::styled(*text, Style::default().fg(color))));
         }
 
         let shadow_para = Paragraph::new(shadow_lines)
@@ -90,10 +87,7 @@ impl Banner {
             let bg = fill_colors[i % fill_colors.len()];
             lines.push(Line::from(Span::styled(
                 *text,
-                Style::default()
-                    .fg(fg)
-                    .bg(bg)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
             )));
         }
 

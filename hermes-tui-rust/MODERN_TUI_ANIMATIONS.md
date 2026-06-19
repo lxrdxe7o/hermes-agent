@@ -1,143 +1,102 @@
-# Project Hermes: Advanced TUI Animation & Architecture Plan
+# Project Hermes: TUI Animation & Architecture Plan
 
-This document serves as the definitive, multi-phase technical specification for implementing a highly dynamic, visually striking, and zero-latency terminal user interface (TUI) for Project Hermes. 
+This document tracks the animation and architecture plan for the Rust TUI. It has been updated to reflect the current implementation state as of June 19, 2026.
 
-It synthesizes state-of-the-art Rust TUI techniques extracted from industry-leading repositories (`CodeWhale`, `oh-my-pi`, `oha`, `Yazi`, `Helix`) and official `ratatui.rs` best practices. It rigorously enforces architectural backpressure, strict mutability boundaries, and zero-flicker terminal rendering.
+## Current Status
 
----
+| Area | Status | Notes |
+| ---- | ------ | ----- |
+| Demand-driven rendering | ✅ Implemented | `src/engine.rs` gates polling and animation ticks through an active-animation counter. |
+| DEC 2026 synchronized output | ✅ Implemented | `engine::draw_sync()` wraps frame draws in begin/end synchronized output sequences. |
+| Gateway stdio transport | ✅ Implemented | `GatewayClient` spawns `python -m tui_gateway.entry` and reads JSON-RPC events through a background thread. |
+| Multi-view workspace | ✅ Implemented | Dashboard, IDE, Kanban, and Chat views are routed by `ViewState`. |
+| Animated borders and wave footer | ✅ Implemented | `src/ui/borders.rs` and `src/ui/wave.rs` render live motion. |
+| Protocol-linked effects | ✅ Implemented | `src/ui/effects.rs` wraps `tachyonfx::EffectManager` and triggers effects for streaming, tools, view switches, and grand loader moments. |
+| Local IDE pane | ✅ Implemented | `src/ui/file_tree.rs` and `src/ui/editor.rs` provide a local file tree and editor. |
+| Subagent tracking | ✅ Implemented | `src/ui/subagent.rs` and `CardManager` render subagent/tool activity in chat. |
+| Dashboard telemetry | ⚠️ Partial | CPU and memory are real via `sysinfo`; network and token-speed values remain placeholders. |
+| Kanban | ⚠️ Mock | The board is visual only and is not connected to durable task state. |
+| Tachyonfx buffer bridge | ⚠️ Compatibility shim | `src/ui/effects.rs` uses an unsafe transmute between Ratatui 0.28 and tachyonfx's Ratatui-core 0.1 buffer type. |
 
-## 🏗️ Phase 1: Core Engine & Async Foundation
+## Phase 1: Core Engine & Async Foundation
 
-**Goal:** Establish a strictly bounded, backpressure-aware, demand-driven render loop that never starves the UI thread or causes Out-Of-Memory (OOM) errors during chaotic LLM streaming.
+**Goal:** Establish a strictly bounded, backpressure-aware, demand-driven render loop that never starves the UI thread.
 
-### 1.1 Bounded Worker Pools & Backpressure (`Helix` & Gemini Critique)
-**Instruction:** Never use unbounded channels (`tokio::sync::mpsc::unbounded_channel`) for the primary event bus. Unbounded queues during a heavy LLM streaming event will cause memory bloat and UI starvation.
-- [ ] Initialize `tokio::sync::mpsc::channel` with a calculated buffer size (e.g., 1024) for critical events to enforce backpressure.
-- [ ] Use `tokio::sync::watch` channels for state that only requires the latest value (e.g., progress bars, CPU/RAM telemetry).
-- [ ] Implement the **Agent Context Protocol (ACP) Adapter** via JSON-RPC. Rust Tokio workers should handle serialization and dispatching, allowing Python to maintain sandbox isolation.
+- [x] Use a background reader thread for stdio JSON-RPC events.
+- [x] Gate polling and rendering through `engine::poll_timeout()` and the active-animation counter.
+- [x] Use DEC mode `?2026h` / `?2026l` around frame draws for synchronized terminal output.
+- [ ] Add production-grade E2E tests against a live Hermes gateway.
+- [ ] Harden reconnect behavior and document the exact failure modes.
 
-### 1.2 Demand-Driven Animation States (Anti-Polling Pattern)
-**Instruction:** Brute-force 60-FPS polling forces the CPU to diff the terminal buffer continuously, consuming up to 50% of CPU time even when idle.
-- [ ] Ditch the continuous 16ms tick loop. Instead, implement a **Demand-Driven Render State**.
-- [ ] The Central Dispatcher maintains an `AtomicUsize` of active animations.
-- [ ] The 60-FPS ticker is *suspended entirely* unless `active_animations > 0`. The event loop otherwise blocks cleanly on user input or async I/O.
+## Phase 2: Component Tree & Mutability Boundaries
 
-### 1.3 Zero-Flicker Synchronization (`CodeWhale` & `Yazi` pattern)
-**Instruction:** Ratatui redraws can cause subtle tearing on modern emulators (Kitty, Ghostty) during high-frequency updates. Wrap frames in DEC 2026 sync sequences.
-- [ ] Override standard stdout initialization to inject `\x1b[?2026h` (Begin Sync) and `\x1b[?2026l` (End Sync) around the `terminal.draw` call. This guarantees atomic frame swaps.
+**Goal:** Keep rendering pure where practical and route state mutation through the app update path.
 
----
+- [x] `src/app.rs` owns mutable state and routes between views.
+- [x] UI modules render from references where possible.
+- [x] Chat cards, subagent lists, and dashboards render from state references.
+- [x] The session sidebar uses an intentional raw-pointer borrow workaround; see `src/app.rs` comments.
+- [ ] Continue moving complex render helpers into read-only component structs as the UI grows.
 
-## ⚡ Phase 2: The Component Tree & Mutability Boundaries
+## Phase 3: Embedded Local Editor
 
-**Goal:** Build a hierarchical layout tree that respects idiomatic Rust borrowing rules and supports zero-copy rendering.
+**Goal:** Provide a useful local developer workspace inside the TUI.
 
-### 2.1 The Mutability Trap & WidgetRef
-**Instruction:** Do **not** pass `&mut self` to a Component's `draw()` function. Doing so prevents widget caching and triggers mutable aliasing compiler errors when iterating over global state.
-- [ ] Components must implement rendering strictly as an immutable operation.
-- [ ] Utilize Ratatui's `WidgetRef` trait to build complex component structures once and render them via immutable references multiple times.
-- [ ] For components requiring internal rendering state (e.g., visual scroll offsets calculated during layout), implement Ratatui's `StatefulWidget` trait. Pass the mutable `State` struct separately during the `f.render_stateful_widget` call.
+- [x] File tree rooted at the current working directory.
+- [x] File type icons and scrollable tree navigation.
+- [x] Editor pane backed by `tui-textarea`.
+- [x] Focus toggle between file tree and editor.
+- [ ] Gateway-backed file edit application.
+- [ ] LSP or diagnostics integration.
+- [ ] Persistent editor history and undo/redo beyond the current textarea buffer.
 
-### 2.2 Thread-Local O(1) Syntax Highlighting (`oh-my-pi` pattern)
-**Instruction:** Standard `syntect` theme resolution is too slow for high-throughput LLM streaming.
-- [ ] Implement a thread-local cache (`SCOPE_COLOR_CACHE`).
-- [ ] Flatten the Hermes theme into an 11-color palette array.
-- [ ] Parse incoming markdown chunks and resolve colors in $O(1)$ time.
+## Phase 4: Native Motion & Protocol-Linked Effects
 
-```rust
-// [Code Template: O(1) Theme Resolution]
-thread_local! {
-    static PALETTE: [&'static str; 5] = ["\x1b[38;5;244m", "\x1b[38;5;81m", /*...*/];
-}
+**Goal:** Provide constant visual feedback using pure math and `tachyonfx`.
 
-pub fn fast_highlight(text: &str, scope: usize) -> String {
-    let color = PALETTE.get(scope).unwrap_or(&"\x1b[39m");
-    format!("{}{}\x1b[39m", color, text)
-}
-```
+- [x] Sine-wave block footer in `src/ui/wave.rs`.
+- [x] Gradient border animation in `src/ui/borders.rs`.
+- [x] Sixel GIF dashboard animation through `bebop.gif`.
+- [x] `tachyonfx::EffectManager` wrapper in `src/ui/effects.rs`.
+- [x] Streaming, tool, view-transition, and grand-loader effects.
+- [ ] Resolve flicker for Sixel/GIF playback on high-latency terminal backends.
+- [ ] Replace the tachyonfx/Ratatui buffer transmute with a safer long-term solution.
 
-### 2.3 Terminal-Aware Dynamic Histograms (`oha` pattern)
-**Instruction:** Charts must fit perfectly without visual clipping. Do not pre-calculate bins; calculate bins dynamically inside the `render` function based on the exact `Rect` width available.
-- [ ] When drawing stats (e.g., token generation speed), determine `bins = block.width / bar_width`.
-- [ ] Apply algorithm backwards (`iter().rev()`) and `break` early to save CPU once the visible chart window is filled.
+## Execution Checklist
 
----
+### Foundation
 
-## 📝 Phase 3: The Embedded Modal Editor
+- [x] Demand-driven render engine.
+- [x] DEC 2026 synchronized output.
+- [x] Gateway child-process lifecycle.
+- [x] stdio JSON-RPC transport.
 
-**Goal:** Integrate a high-performance text editor capable of handling massive, LLM-generated code refactoring and diffing without stalling the event loop.
+### Core UX
 
-### 3.1 Rope Data Structures (`Helix` pattern)
-**Instruction:** A standard Rust `String` or `Vec<String>` is catastrophic for large text editing.
-- [ ] Replace standard strings with a **Rope data structure** (`ropey` crate) for all editable contexts and large chat logs.
-- [ ] This ensures logarithmic time complexity for insertions and deletions, regardless of file size.
+- [x] Multi-view routing.
+- [x] Chat with streaming and tool cards.
+- [x] Local IDE workspace.
+- [x] Subagent sidebar.
+- [x] Help overlay.
 
-### 3.2 Render Culling & Syntax Caching
-**Instruction:** Re-running Regex or Tree-sitter over a massive buffer on every 16ms animation frame will crash the UI.
-- [ ] Implement strict **Render Culling**: Query the Rope *only* for the subset of lines visible within the physical `Rect` constraints.
-- [ ] Cache syntax highlighting spans for formatted lines. Only invalidate the cache for lines explicitly altered by user input or LLM generation.
+### Visual Polish
 
-### 3.3 Native Cursor Synchronization & Input Trapping
-**Instruction:** The physical hardware cursor must align with multi-width Unicode characters to support screen readers and non-Latin Input Method Editors.
-- [ ] Map internal Rope coordinates to terminal coordinates using the `unicode-width` crate.
-- [ ] When the editor enters "Insert Mode", the Central Dispatcher must **suspend global hotkey resolution** and pipe key payloads strictly to the focused editor component.
+- [x] Animated borders.
+- [x] Wave footer.
+- [x] Sixel GIF.
+- [x] Protocol-linked effects.
+- [x] View transition animations.
 
----
+### Remaining Hardening
 
-## 🎨 Phase 4: Native Math & Aetheric Shaders
+- [ ] Real Kanban integration.
+- [ ] Real network and token-speed telemetry.
+- [ ] CLI/installer integration for the Rust TUI.
+- [ ] Full E2E gateway smoke tests.
+- [ ] Safer tachyonfx buffer bridge.
 
-**Goal:** Provide constant visual feedback using pure math and `tachyonfx`, requiring minimal memory churn.
+## Notes
 
-### 4.1 Mathematical Block Waves (`CodeWhale` pattern)
-**Instruction:** For "Thinking/Working" states, do not use simple dots. Use sine waves mapped to Ratatui block characters (` ' ', '▂', '▃', '▄', '▅' `) to create a fluid, oceanic footer.
-
-```rust
-// [Code Template: Phase-Shifted Wave]
-const WAVE: [char; 5] = [' ', '▂', '▃', '▄', '▅'];
-
-pub fn wave_glyph(x: usize, tick: usize) -> char {
-    let t = tick as f64 / 100.0;
-    let x_f = x as f64;
-    let val = (x_f * 0.5 - t * 8.0).sin() + (x_f * 0.2 + t * 3.0).sin() * 0.5;
-    let normalized = ((val + 1.5) / 3.0).clamp(0.0, 1.0);
-    WAVE[(normalized * 4.0).round() as usize]
-}
-```
-
-### 4.2 Protocol-Linked DSL Shaders (`tachyonfx`)
-**Instruction:** Initialize `tachyonfx::EffectManager` in the root `App`. Apply it to the `Frame` buffer *after* all rendering is complete. Optimize for changing ANSI styles over graphemes to reduce buffer diffing overhead.
-- [ ] **LLM Delta Streaming:** Trigger `fx::coalesce(300)` over the newly added text block.
-- [ ] **Tool Execution:** Trigger `fx::hsl_shift` to sweep a bright cyan/green line across the tool card.
-
-```rust
-// [Code Template: Tachyon Post-Processing]
-terminal.draw(|frame| {
-    let area = frame.area();
-    // 1. Native Render via Immutable References
-    frame.render_widget(&chat_widget, area);
-    
-    // 2. Shader Overlay
-    if !state.low_motion {
-        state.effects.process_effects(tick_duration, frame.buffer_mut(), area);
-    }
-})?;
-```
-
----
-
-## 🚀 Execution Checklist
-
-### Sprint 1: Foundation (Zero-Flicker & Async)
-- [ ] Setup `tokio` worker pools with **Bounded Channels** (`mpsc::channel`) to enforce backpressure.
-- [ ] Enable DEC 2026 buffer synchronization for tear-free output.
-- [ ] Implement the **Demand-Driven Render State** engine to suspend 60-FPS polling when idle.
-
-### Sprint 2: Core UX (Components & Editor)
-- [ ] Refactor the Component trait to use `WidgetRef` and `StatefulWidget` instead of `&mut self` draws.
-- [ ] Integrate the `ropey` crate for managing large text inputs and chat histories.
-- [ ] Implement `SCOPE_COLOR_CACHE` for $O(1)$ Markdown highlighting.
-
-### Sprint 3: The "Aetheric" Polish (Shaders & Math)
-- [ ] Build the CodeWhale-inspired Sine Wave Footer.
-- [ ] Integrate `tachyonfx` and bind JSON-RPC `tool.start` to shader pipelines.
-- [ ] Implement mathematical cursor syncing via `unicode-width` for the embedded editor.
+- Motion must never block user input or gateway communication.
+- Effects are intentionally demand-driven and should stop ticking when idle.
+- The current implementation favors experimental velocity over production polish; future work should focus on hardening and integration rather than adding more visual effects.

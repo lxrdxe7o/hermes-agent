@@ -84,6 +84,31 @@ impl SubagentInfo {
             SubagentStatus::Idle => (" − ", Style::default().fg(Color::DarkGray)),
         }
     }
+
+    /// Get animated status icon and style
+    #[must_use]
+    pub fn status_style_animated(&self, frame: u64) -> (String, Style) {
+        match self.status {
+            SubagentStatus::Running => {
+                let icons = [" ▹ ", " ▹ ", " ▶ ", " ▶ "];
+                let idx = (frame as usize / 2) % icons.len();
+                (
+                    icons[idx].to_string(),
+                    Style::default().fg(Color::Yellow).bold(),
+                )
+            }
+            SubagentStatus::Completed => {
+                (" ✓ ".to_string(), Style::default().fg(Color::Green).bold())
+            }
+            SubagentStatus::Failed => (" ✗ ".to_string(), Style::default().fg(Color::Red).bold()),
+            SubagentStatus::Pending => {
+                let icons = [" ◌ ", " ◍ ", " ◌ ", " ◍ "];
+                let idx = (frame as usize / 8) % icons.len();
+                (icons[idx].to_string(), Style::default().fg(Color::DarkGray))
+            }
+            SubagentStatus::Idle => (" − ".to_string(), Style::default().fg(Color::DarkGray)),
+        }
+    }
 }
 
 /// Widget for displaying a list of subagents
@@ -195,10 +220,22 @@ impl SubagentList {
 
     /// Render the subagent list
     pub fn render(&self, area: Rect, frame: &mut Frame, animation_frame: u64, is_running: bool) {
-        let title = format!(" Subagents ({}) ", self.active_count());
+        let active_count = self.active_count();
+        let title_style = if active_count > 0 {
+            let pulse = (animation_frame as f64 * 0.1).sin() * 0.5 + 0.5;
+            if pulse > 0.7 {
+                Style::default().fg(Color::Cyan).bold()
+            } else {
+                Style::default().fg(Color::Rgb(0, 150, 150)).bold()
+            }
+        } else {
+            Style::default().fg(Color::Cyan).bold()
+        };
+
+        let title = format!(" Subagents ({}) ", active_count);
         let block = Block::default()
             .title(title)
-            .title_style(Style::default().fg(Color::Cyan).bold())
+            .title_style(title_style)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded);
 
@@ -206,8 +243,14 @@ impl SubagentList {
             let inner = block.inner(area);
             frame.render_widget(block, area);
             // Render animated gradient border over the block
-            crate::ui::borders::render_gradient_border(frame.buffer_mut(), area, animation_frame, true, is_running);
-            
+            crate::ui::borders::render_gradient_border(
+                frame.buffer_mut(),
+                area,
+                animation_frame,
+                true,
+                is_running,
+            );
+
             let text = Text::from(Line::from(Span::styled(
                 " No active subagents",
                 Style::default().fg(Color::DarkGray),
@@ -219,7 +262,13 @@ impl SubagentList {
         let inner = block.inner(area);
         frame.render_widget(block, area);
         // Render animated gradient border over the block
-        crate::ui::borders::render_gradient_border(frame.buffer_mut(), area, animation_frame, true, is_running);
+        crate::ui::borders::render_gradient_border(
+            frame.buffer_mut(),
+            area,
+            animation_frame,
+            true,
+            is_running,
+        );
 
         // Calculate visible range
         let start = self.scroll as usize;
@@ -236,27 +285,37 @@ impl SubagentList {
                 break;
             }
             let line_area = Rect::new(inner.x, inner.y + y_offset, inner.width, 1);
-            let line = self.build_agent_line(agent);
+            let line = self.build_agent_line_animated(agent, animation_frame);
             frame.render_widget(Paragraph::new(line), line_area);
             y_offset += 1;
         }
     }
 
-    /// Build a single line for a subagent entry
-    fn build_agent_line(&self, agent: &SubagentInfo) -> Line<'static> {
-        let (icon, icon_style) = agent.status_style();
+    /// Build a single line for a subagent entry with animation
+    fn build_agent_line_animated(&self, agent: &SubagentInfo, frame: u64) -> Line<'static> {
+        let (icon, icon_style) = agent.status_style_animated(frame);
         let mut spans = Vec::new();
 
         // Status icon
-        spans.push(Span::styled(icon.to_string(), icon_style));
+        spans.push(Span::styled(icon, icon_style));
 
         // Parent relationship
         if agent.parent_id.is_some() {
             spans.push(Span::styled("└ ", Style::default().fg(Color::DarkGray)));
         }
 
-        // Agent ID
-        spans.push(Span::styled(agent.id.clone(), Style::default().bold()));
+        // Agent ID with pulse if running
+        let id_style = if agent.status == SubagentStatus::Running {
+            let shimmer = ((frame as f64 * 0.2).sin() * 0.5 + 0.5) > 0.8;
+            if shimmer {
+                Style::default().fg(Color::White).bold()
+            } else {
+                Style::default().fg(Color::Rgb(200, 200, 200)).bold()
+            }
+        } else {
+            Style::default().bold()
+        };
+        spans.push(Span::styled(agent.id.clone(), id_style));
 
         // Goal (truncated)
         let max_goal_len = 40usize;
@@ -265,7 +324,15 @@ impl SubagentList {
         } else {
             format!(": {}", agent.goal)
         };
-        spans.push(Span::styled(goal, Style::default().fg(Color::White)));
+
+        let goal_style = if agent.status == SubagentStatus::Running {
+            let pulse = (frame as f64 * 0.1).cos() * 0.2 + 0.8;
+            let val = (255.0 * pulse) as u8;
+            Style::default().fg(Color::Rgb(val, val, val))
+        } else {
+            Style::default().fg(Color::White)
+        };
+        spans.push(Span::styled(goal, goal_style));
 
         // Summary (if completed/failed)
         if let Some(ref summary) = agent.summary {
@@ -358,7 +425,7 @@ mod tests {
     fn test_build_agent_line() {
         let list = SubagentList::new();
         let agent = SubagentInfo::new("worker-1", "analyze data", None);
-        let line = list.build_agent_line(&agent);
+        let line = list.build_agent_line_animated(&agent, 0);
         assert!(!line.spans.is_empty());
     }
 }

@@ -268,22 +268,67 @@ impl CardComponent {
     /// Update tool card content for a running tool with throbber spinner
     #[must_use]
     pub fn running_spinner(frame: u32) -> String {
-        let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let spinner_chars = [
+            "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦",
+            "⠧", "⠇", "⠏", "⠁", "⠂", "⠄", "⡀", "⢀", "⠠", "⠐", "⠈",
+        ];
         let idx = (frame as usize) % spinner_chars.len();
-        format!("{} Running...", spinner_chars[idx])
+
+        let dots = match (frame / 5) % 4 {
+            0 => ".  ",
+            1 => ".. ",
+            2 => "...",
+            _ => "   ",
+        };
+
+        format!("{} Running{}", spinner_chars[idx], dots)
     }
+
+    /// Get animated status icon for tool cards
+    fn status_icon(status: ToolStatus, frame: u64) -> Span<'static> {
+        match status {
+            ToolStatus::Running => {
+                let icons = [" ◴ ", " ◷ ", " ◶ ", " ◵ "];
+                let idx = (frame as usize / 2) % icons.len();
+                Span::styled(icons[idx], Style::default().fg(Color::Yellow).bold())
+            }
+            ToolStatus::Completed => Span::styled(" ✓ ", Style::default().fg(Color::Green).bold()),
+            ToolStatus::Failed => Span::styled(" ✗ ", Style::default().fg(Color::Red).bold()),
+            ToolStatus::Pending => {
+                let icons = [" ○ ", " ◌ ", " ◍ ", " ◌ "];
+                let idx = (frame as usize / 8) % icons.len();
+                Span::styled(icons[idx], Style::default().fg(Color::DarkGray))
+            }
+        }
+    }
+    /// Get a tool-specific icon
+    fn tool_type_icon(tool_name: &str) -> &'static str {
+        let name = tool_name.to_lowercase();
+        if name.contains("search") || name.contains("grep") || name.contains("find") {
+            "🔍"
+        } else if name.contains("read") || name.contains("cat") {
+            "📖"
+        } else if name.contains("write") || name.contains("edit") || name.contains("replace") {
+            "📝"
+        } else if name.contains("shell") || name.contains("run") || name.contains("exec") {
+            "⚡"
+        } else if name.contains("git") {
+            "🌿"
+        } else if name.contains("test") {
+            "🧪"
+        } else if name.contains("list") || name.contains("ls") {
+            "📁"
+        } else {
+            "🛠️"
+        }
+    }
+
     /// Build the title for a tool card
     fn tool_card_title(data: &ToolCardData) -> String {
-        let status_icon = match data.status {
-            ToolStatus::Running => " ◈ ",
-            ToolStatus::Completed => " ✓ ",
-            ToolStatus::Failed => " ✗ ",
-            ToolStatus::Pending => " ○ ",
-        };
         let duration = data
             .duration_ms
             .map_or(String::new(), |ms| format!(" ({:.1}s)", ms as f64 / 1000.0));
-        format!("{} {}{}", status_icon, data.tool_name, duration)
+        format!("{}{}", data.tool_name, duration)
     }
 
     /// Build the content for a tool card
@@ -299,7 +344,7 @@ impl CardComponent {
         let result_text = match data.status {
             ToolStatus::Running => {
                 // Use the running_spinner with throttled frame
-                let throttled = spinner_frame / 10;
+                let throttled = spinner_frame / 4;
                 Self::running_spinner(throttled)
             }
             ToolStatus::Completed => {
@@ -382,23 +427,53 @@ impl CardComponent {
             CardType::Success => ratatui::style::Color::Green,
             CardType::Warning => ratatui::style::Color::Yellow,
             CardType::Error => ratatui::style::Color::Red,
-            CardType::Tool => self.colors.tool_text,
+            CardType::Tool => {
+                let name = self.tool_name.to_lowercase();
+                if name.contains("shell") || name.contains("run") {
+                    Color::Rgb(255, 95, 0) // Orange for execution
+                } else if name.contains("write") || name.contains("edit") {
+                    Color::Rgb(0, 255, 135) // Spring green for edits
+                } else if name.contains("search") || name.contains("grep") {
+                    Color::Rgb(0, 175, 255) // Deep sky blue for search
+                } else {
+                    self.colors.tool_text
+                }
+            }
         }
+    }
+
+    /// Render a small inline sparkline for activity
+    fn render_mini_sparkline(frame: u64, width: usize) -> String {
+        let chars = [" ", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+        let mut s = String::with_capacity(width);
+        for i in 0..width {
+            let t = (frame as f64 * 0.2) + (i as f64 * 0.5);
+            let val = (t.sin() * 0.5 + 0.5) * 7.0;
+            s.push_str(chars[val.round() as usize]);
+        }
+        s
     }
 
     /// Render the card
     pub fn render(&self, frame: &mut Frame, area: Rect, animation_frame: u64) {
         let is_tool = self.card_type == CardType::Tool;
-
-        // Build title with fixed indicator for tool cards
-        let title = if is_tool {
-            format!(" ▼ {}", self.title)
-        } else {
-            format!(" {} ", self.title)
-        };
-
-        // If it's a running tool, we want an animated border
         let is_running_tool = is_tool && self.status == Some(ToolStatus::Running);
+
+        // Animated background color for running tools
+        let bg_color = if is_running_tool {
+            let pulse = (animation_frame as f64 * 0.1).sin() * 0.05 + 0.95;
+            match self.bg_color() {
+                Color::Rgb(r, g, b) => {
+                    let r = (r as f64 * pulse).clamp(0.0, 255.0) as u8;
+                    let g = (g as f64 * pulse).clamp(0.0, 255.0) as u8;
+                    let b = (b as f64 * pulse).clamp(0.0, 255.0) as u8;
+                    Color::Rgb(r, g, b)
+                }
+                _ => self.bg_color(),
+            }
+        } else {
+            self.bg_color()
+        };
 
         // Render the gradient border (animated if running)
         crate::ui::borders::render_gradient_border(
@@ -409,10 +484,55 @@ impl CardComponent {
             is_running_tool,
         );
 
+        // Build title with animated elements
+        let mut title_spans = Vec::new();
+        if is_tool {
+            // Dropdown/Expand indicator
+            let expand_icon = if self.expanded { " ▼ " } else { " ▶ " };
+            title_spans.push(Span::styled(expand_icon, Style::default().fg(Color::Gray)));
+
+            // Status icon (animated)
+            if let Some(status) = self.status {
+                title_spans.push(Self::status_icon(status, animation_frame));
+            }
+
+            // Tool type icon
+            title_spans.push(Span::raw(format!(
+                " {} ",
+                Self::tool_type_icon(&self.tool_name)
+            )));
+
+            // Title text with shimmer effect if running
+            let text_color = self.text_color();
+            let title_style = if is_running_tool {
+                let shimmer = ((animation_frame as f64 * 0.2).sin() * 0.5 + 0.5) > 0.7;
+                if shimmer {
+                    Style::default().fg(Color::White).bold()
+                } else {
+                    Style::default().fg(text_color).bold()
+                }
+            } else {
+                Style::default().fg(text_color).bold()
+            };
+            title_spans.push(Span::styled(&self.title, title_style));
+
+            // Add activity sparkline if running
+            if is_running_tool {
+                title_spans.push(Span::raw("  "));
+                title_spans.push(Span::styled(
+                    Self::render_mini_sparkline(animation_frame, 8),
+                    Style::default().fg(Color::Rgb(0, 255, 255)),
+                ));
+            }
+        } else {
+            title_spans.push(Span::styled(
+                format!(" {} ", self.title),
+                Style::default().bold(),
+            ));
+        }
+
         // Create a block for the title and background
-        let block = Block::default()
-            .title(Span::styled(title, Style::default().bold()))
-            .bg(self.bg_color());
+        let block = Block::default().title(Line::from(title_spans)).bg(bg_color);
 
         // Inner area (accounting for the border we just drew)
         let inner_area = Rect {
@@ -434,8 +554,18 @@ impl CardComponent {
         if is_tool {
             // Always show detailed breakdown
             if let Some(args) = &self.arguments {
+                let arg_style = if is_running_tool {
+                    let pulse = (animation_frame as f64 * 0.15).cos() * 0.5 + 0.5;
+                    if pulse > 0.8 {
+                        Color::White
+                    } else {
+                        Color::Gray
+                    }
+                } else {
+                    Color::Gray
+                };
                 lines.push(Line::from(vec![
-                    Span::styled(" Args: ", Style::default().fg(Color::Gray).italic()),
+                    Span::styled(" Args: ", Style::default().fg(arg_style).italic()),
                     Span::styled(args, Style::default().fg(self.colors.code_text)),
                 ]));
             }
@@ -455,15 +585,29 @@ impl CardComponent {
                 }
             } else if let Some(err) = &self.error {
                 lines.push(Line::from(vec![
+                    Span::raw("   "),
                     Span::styled(" Error: ", Style::default().fg(Color::Red).bold()),
                     Span::styled(err, Style::default().fg(Color::Red)),
                 ]));
             } else if self.status == Some(ToolStatus::Running) {
+                // Large activity indicator
+                let loader = match (animation_frame / 4) % 4 {
+                    0 => "▖ ",
+                    1 => "▘ ",
+                    2 => "▝ ",
+                    _ => "▗ ",
+                };
                 lines.push(Line::from(vec![
                     Span::raw("   "),
+                    Span::styled(loader, Style::default().fg(Color::Rgb(0, 255, 255)).bold()),
                     Span::styled(
-                        Self::running_spinner(animation_frame as u32 / 5),
+                        Self::running_spinner(animation_frame as u32),
                         Style::default().fg(Color::Yellow),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(
+                        Self::render_mini_sparkline(animation_frame, 20),
+                        Style::default().fg(Color::Rgb(0, 150, 255)),
                     ),
                 ]));
             }
@@ -480,7 +624,7 @@ impl CardComponent {
         // Create paragraph with content and wrapping
         let paragraph = Paragraph::new(Text::from(lines))
             .wrap(Wrap { trim: false })
-            .style(Style::new().bg(self.bg_color()))
+            .style(Style::new().bg(bg_color))
             .block(Block::new().padding(Padding::new(1, 1, 0, 1)));
 
         frame.render_widget(paragraph, inner_area);

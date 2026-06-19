@@ -26,13 +26,13 @@ use ratatui::{
 
 use crate::engine;
 
-const WAVE_STR: [&str; 5] = [" ", "▂", "▃", "▄", "▅"];
+const WAVE_STR: [char; 9] = [' ', ' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
 const COLOR_PROMPT: Color = Color::Rgb(102, 217, 239); // Cyan
-const COLOR_TOOL: Color = Color::Rgb(250, 189, 47);    // Yellow
+const COLOR_TOOL: Color = Color::Rgb(250, 189, 47); // Yellow
 const COLOR_REASON: Color = Color::Rgb(174, 129, 255); // Purple
-const COLOR_OUTPUT: Color = Color::Rgb(166, 226, 46);  // Green
-const COLOR_FAILED: Color = Color::Rgb(249, 38, 114);  // Red
+const COLOR_OUTPUT: Color = Color::Rgb(166, 226, 46); // Green
+const COLOR_FAILED: Color = Color::Rgb(249, 38, 114); // Red
 
 const COLORS: [Color; 5] = [
     COLOR_PROMPT,
@@ -44,39 +44,42 @@ const COLORS: [Color; 5] = [
 
 const LABELS: [&str; 5] = ["Prompt", "Tool", "Reason", "Output", "Fail"];
 
-/// Evaluate a phase-shifted dual-sine wave at column `x` for animation tick
-/// `tick`.
-///
-/// Two sine waves are summed so the pattern feels organic rather than a single
-/// boring sinusoid. Amplitude and speed vary based on the token `count`.
-#[must_use]
-pub fn wave_glyph(x: usize, tick: usize, count: u32) -> &'static str {
-    // Speed proportional to token count.
-    let speed_mult = 1.0 + (count as f64).ln_1p() * 0.5;
-    // Amplitude increases with tokens, but starts low.
-    let amp_mult = 0.15 + ((count as f64).ln_1p() / 6.0).clamp(0.0, 0.85);
-
-    let t = (tick as f64 / 100.0) * speed_mult;
+/// Internal wave height evaluator for an "Equalizer" style motion.
+/// Uses multiple frequencies to simulate a frequency analyzer.
+fn get_bar_height(x: usize, tick: usize, count: u32) -> f64 {
+    let speed_mult = 1.0 + f64::from(count).ln_1p() * 0.5;
+    let t = (tick as f64 / 15.0) * speed_mult;
     let x_f = x as f64;
-    
-    // Evaluate base wave in [-1.5, 1.5]
-    let val = (x_f * 0.5 - t * 8.0).sin() + (x_f * 0.2 + t * 3.0).sin() * 0.5;
-    
-    // Normalize to [0, 1] then apply amplitude mapping to bias toward bottom when count=0
-    let normalized_base = (val + 1.5) / 3.0; 
-    let normalized = (normalized_base * amp_mult).clamp(0.0, 1.0);
 
-    let idx = (normalized * 4.0).round() as usize;
-    WAVE_STR[idx.clamp(0, 4)]
+    // Sum of different frequencies for "frequency analyzer" look
+    let f1 = (x_f * 0.5 + t * 0.8).sin() * 0.4;
+    let f2 = (x_f * 1.2 - t * 1.5).sin() * 0.3;
+    let f3 = (x_f * 2.5 + t * 2.2).sin() * 0.2;
+    let f4 = (x_f * 0.1 - t * 0.5).cos() * 0.5; // slow baseline
+
+    let val = (f1 + f2 + f3 + f4).abs(); // Use absolute to keep it above baseline
+
+    // Scale and add some randomness based on X to make bars jumpy
+    let noise = ((x_f * 7.7 + t * 3.3).sin() * 0.1).abs();
+
+    (val + noise).clamp(0.0, 1.0)
 }
 
-/// Render an animated wave footer across the full width of `area`.
-///
-/// - **Renders backwards** (`iter().rev()`) so the rightmost edge is always
-///   the freshest data.
-/// - Calls `engine::animation_start()` / `engine::animation_end()` to keep the
-///   demand-driven render counter correct.
-pub fn render_wave_footer(frame: &mut Frame, area: Rect, tick: usize, usage: (u32, u32, u32, u32, u32)) {
+/// Map a normalized wave height to one of the renderable block glyphs.
+#[cfg(test)]
+fn wave_glyph(x: usize, tick: usize, count: u32) -> char {
+    let h_norm = get_bar_height(x, tick, count);
+    let idx = (h_norm * (WAVE_STR.len() - 1) as f64).round() as usize;
+    WAVE_STR[idx.clamp(0, WAVE_STR.len() - 1)]
+}
+
+/// Render an animated equalizer wave footer across the full width of `area`.
+pub fn render_wave_footer(
+    frame: &mut Frame,
+    area: Rect,
+    tick: usize,
+    usage: (u32, u32, u32, u32, u32),
+) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -90,7 +93,7 @@ pub fn render_wave_footer(frame: &mut Frame, area: Rect, tick: usize, usage: (u3
         width: area.width,
         height: wave_height,
     };
-    
+
     let text_area = Rect {
         x: area.x,
         y: area.y + wave_height,
@@ -100,20 +103,20 @@ pub fn render_wave_footer(frame: &mut Frame, area: Rect, tick: usize, usage: (u3
 
     let width = area.width as usize;
     let counts = [usage.0, usage.1, usage.2, usage.3, usage.4];
-    
+
     // Calculate pillar widths
     let mut col_widths = [0_u16; 5];
     for x in 0..width {
         let segment_idx = (x * 5) / width;
-        col_widths[segment_idx] += 1;
+        col_widths[segment_idx.min(4)] += 1;
     }
 
     let bg_color = Color::Rgb(27, 32, 33);
 
-    // Render wave
+    // Render Equalizer Bars
     if wave_height > 0 {
         let mut lines: Vec<Line> = Vec::with_capacity(wave_height as usize);
-        
+
         let styles = [
             Style::default().fg(COLORS[0]).bg(bg_color),
             Style::default().fg(COLORS[1]).bg(bg_color),
@@ -122,19 +125,34 @@ pub fn render_wave_footer(frame: &mut Frame, area: Rect, tick: usize, usage: (u3
             Style::default().fg(COLORS[4]).bg(bg_color),
         ];
 
-        for _row in 0..wave_height {
+        let wave_h_f = f64::from(wave_height);
+
+        for row in 0..wave_height {
+            let row_idx = f64::from(wave_height - 1 - row);
             let mut spans: Vec<Span> = Vec::with_capacity(width);
 
-            for x in (0..width).rev() {
+            for x in 0..width {
                 let segment_idx = (x * 5) / width;
+                let segment_idx = segment_idx.min(4);
                 let count = counts[segment_idx];
                 let style = styles[segment_idx];
-                
-                let ch = wave_glyph(x, tick, count);
-                spans.push(Span::styled(ch, style));
+
+                let h_norm = get_bar_height(x, tick, count);
+                let total_h = h_norm * wave_h_f;
+
+                let ch = if total_h >= row_idx + 1.0 {
+                    WAVE_STR[8] // Full block
+                } else if total_h <= row_idx {
+                    WAVE_STR[0] // Space
+                } else {
+                    let frac = total_h - row_idx;
+                    let idx = (frac * 8.0).round() as usize;
+                    WAVE_STR[idx.clamp(0, 8)]
+                };
+
+                spans.push(Span::styled(ch.to_string(), style));
             }
-            
-            spans.reverse();
+
             lines.push(Line::from(spans));
         }
 
@@ -146,8 +164,10 @@ pub fn render_wave_footer(frame: &mut Frame, area: Rect, tick: usize, usage: (u3
     if text_height > 0 {
         let mut current_x = text_area.x;
         for (i, &w) in col_widths.iter().enumerate() {
-            if w == 0 { continue; }
-            
+            if w == 0 {
+                continue;
+            }
+
             let chunk = Rect {
                 x: current_x,
                 y: text_area.y,

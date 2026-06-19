@@ -4,7 +4,13 @@ use ratatui::{layout::Rect, Frame};
 pub struct KanbanView;
 
 impl KanbanView {
-    pub fn render(frame: &mut Frame, area: Rect, _colors: &ThemeColors, animation_frame: u64, is_running: bool) {
+    pub fn render(
+        frame: &mut Frame,
+        area: Rect,
+        _colors: &ThemeColors,
+        animation_frame: u64,
+        is_running: bool,
+    ) {
         use ratatui::layout::{Constraint, Direction, Layout};
         use ratatui::style::{Color, Modifier, Style};
         use ratatui::text::{Line, Span};
@@ -31,14 +37,22 @@ impl KanbanView {
         let backlog_block = Block::default()
             .title(Span::styled(
                 " 📋 BACKLOG ",
-                Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Gray)
+                    .add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
             .border_type(BorderType::Plain)
             .border_style(Style::default().fg(Color::DarkGray));
         let backlog_inner = backlog_block.inner(chunks[0]);
         frame.render_widget(backlog_block, chunks[0]);
-        crate::ui::borders::render_gradient_border(frame.buffer_mut(), chunks[0], animation_frame, true, is_running);
+        crate::ui::borders::render_gradient_border(
+            frame.buffer_mut(),
+            chunks[0],
+            animation_frame,
+            true,
+            is_running,
+        );
 
         let mut backlog_lines = Vec::new();
         backlog_lines.push(Line::from(vec![Span::styled(
@@ -81,14 +95,22 @@ impl KanbanView {
         let executing_block = Block::default()
             .title(Span::styled(
                 " ⚡ EXECUTING ",
-                Style::default().fg(Color::Rgb(250, 189, 47)).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Rgb(250, 189, 47))
+                    .add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
             .border_type(BorderType::Thick)
             .border_style(Style::default().fg(Color::Rgb(250, 189, 47)));
         let executing_inner = executing_block.inner(chunks[1]);
         frame.render_widget(executing_block, chunks[1]);
-        crate::ui::borders::render_gradient_border(frame.buffer_mut(), chunks[1], animation_frame, true, is_running);
+        crate::ui::borders::render_gradient_border(
+            frame.buffer_mut(),
+            chunks[1],
+            animation_frame,
+            true,
+            is_running,
+        );
 
         let exec_layout = Layout::default()
             .direction(Direction::Vertical)
@@ -136,14 +158,22 @@ impl KanbanView {
         let verified_block = Block::default()
             .title(Span::styled(
                 " ✅ VERIFIED ",
-                Style::default().fg(Color::Rgb(184, 187, 38)).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Rgb(184, 187, 38))
+                    .add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
             .border_type(BorderType::Plain)
             .border_style(Style::default().fg(Color::DarkGray));
         let verified_inner = verified_block.inner(chunks[2]);
         frame.render_widget(verified_block, chunks[2]);
-        crate::ui::borders::render_gradient_border(frame.buffer_mut(), chunks[2], animation_frame, true, is_running);
+        crate::ui::borders::render_gradient_border(
+            frame.buffer_mut(),
+            chunks[2],
+            animation_frame,
+            true,
+            is_running,
+        );
 
         let mut verified_lines = Vec::new();
         verified_lines.push(Line::from(vec![Span::styled(

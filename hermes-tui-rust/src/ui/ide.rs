@@ -1,6 +1,24 @@
 use crate::state::config::ThemeColors;
 use crate::ui::chat::ChatComponent;
+use crate::ui::editor::Editor;
+use crate::ui::file_tree::FileTree;
 use ratatui::{layout::Rect, Frame};
+
+pub struct IdeState {
+    pub file_tree: FileTree,
+    pub editor: Editor,
+    pub focus_tree: bool, // true for tree, false for editor
+}
+
+impl Default for IdeState {
+    fn default() -> Self {
+        Self {
+            file_tree: FileTree::new(),
+            editor: Editor::new(),
+            focus_tree: true,
+        }
+    }
+}
 
 pub struct IdeView;
 
@@ -11,33 +29,22 @@ impl IdeView {
         _colors: &ThemeColors,
         chat_component: &ChatComponent,
         chat_state: &mut crate::ui::chat::ChatState,
+        ide_state: &mut IdeState,
         connected: bool,
         card_manager: &crate::ui::cards::CardManager,
         subagent_list: &crate::ui::subagent::SubagentList,
         animation_frame: u64,
         is_running: bool,
     ) {
-        // TODO: This is a prototype IDE layout matching the React example.
-        // The File Tree and Editor/Diff are currently hardcoded mocks.
-        // Future work: Connect the File Tree to the actual project structure and the
-        // Editor to the gateway's edit events.
-
         use ratatui::layout::{Constraint, Direction, Layout};
         use ratatui::style::{Color, Modifier, Style};
-        use ratatui::text::{Line, Span};
-        use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph};
-
-        let time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as usize;
-        let offset = (time / 100) % 6;
-        let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][offset % 10];
+        use ratatui::text::Span;
+        use ratatui::widgets::{Block, BorderType, Borders};
 
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Length(25),     // Tree
+                Constraint::Length(30),     // Tree
                 Constraint::Percentage(40), // Editor
                 Constraint::Min(40),        // Chat
             ])
@@ -45,126 +52,30 @@ impl IdeView {
             .split(area);
 
         // 1. File Tree
-        let mut tree_lines = Vec::new();
-        tree_lines.push(Line::from(Span::styled(
-            " hermes-tui-rust/",
-            Style::default()
-                .fg(Color::Gray)
-                .add_modifier(Modifier::BOLD),
-        )));
-        tree_lines.push(Line::from(Span::styled(
-            " ├── .gitignore",
-            Style::default().fg(Color::DarkGray),
-        )));
-        tree_lines.push(Line::from(Span::styled(
-            " ├── src/",
-            Style::default().fg(Color::DarkGray),
-        )));
-        tree_lines.push(Line::from(vec![
-            Span::styled(" │   ├── ", Style::default().fg(Color::DarkGray)),
-            Span::styled("ui/", Style::default().fg(Color::Rgb(250, 189, 47))),
-        ]));
-        tree_lines.push(Line::from(vec![
-            Span::styled(" │   │   ├── ", Style::default().fg(Color::DarkGray)),
-            Span::styled("ide.rs", Style::default().fg(Color::Rgb(250, 189, 47))),
-        ]));
-        tree_lines.push(Line::from(Span::styled(
-            " │   └── main.rs",
-            Style::default().fg(Color::DarkGray),
-        )));
-        tree_lines.push(Line::from(Span::styled(
-            " ├── Cargo.toml",
-            Style::default().fg(Color::DarkGray),
-        )));
-        tree_lines.push(Line::from(Span::styled(
-            " └── README.md",
-            Style::default().fg(Color::DarkGray),
-        )));
-
-        let tree_block = Block::default()
-            .title(Span::styled(
-                " TREE ",
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
-            ))
-            .borders(Borders::ALL)
-            .border_type(BorderType::Plain)
-            .border_style(Style::default().fg(Color::DarkGray))
-            .padding(Padding::new(1, 1, 1, 1));
-        frame.render_widget(Paragraph::new(tree_lines).block(tree_block), chunks[0]);
-        crate::ui::borders::render_gradient_border(frame.buffer_mut(), chunks[0], animation_frame, false, is_running);
+        ide_state.file_tree.render(
+            frame,
+            chunks[0],
+            ide_state.focus_tree,
+            animation_frame,
+            is_running,
+        );
 
         // 2. Editor
-        let mut diff_lines = Vec::new();
-        diff_lines.push(Line::from(Span::styled(
-            " fn render_ide(frame: &mut Frame, area: Rect) {",
-            Style::default().fg(Color::DarkGray),
-        )));
-        diff_lines.push(Line::from(vec![
-            Span::styled("-    let chunks = Layout::default()", Style::default().fg(Color::Rgb(204, 36, 29))),
-        ]));
-        diff_lines.push(Line::from(vec![
-            Span::styled("+    let chunks = Layout::default()", Style::default().fg(Color::Rgb(184, 187, 38))),
-        ]));
-        diff_lines.push(Line::from(vec![
-            Span::styled("+        .spacing(1)", Style::default().fg(Color::Rgb(184, 187, 38))),
-        ]));
-        diff_lines.push(Line::from(Span::styled(
-            "         .direction(Direction::Horizontal)",
-            Style::default().fg(Color::DarkGray),
-        )));
-        diff_lines.push(Line::from(Span::styled(
-            "         .constraints([",
-            Style::default().fg(Color::DarkGray),
-        )));
-        diff_lines.push(Line::from(Span::styled(
-            "             Constraint::Length(25),",
-            Style::default().fg(Color::DarkGray),
-        )));
-        diff_lines.push(Line::from(Span::styled(
-            "             Constraint::Percentage(40),",
-            Style::default().fg(Color::DarkGray),
-        )));
-        diff_lines.push(Line::from(Span::styled(
-            "         ])",
-            Style::default().fg(Color::DarkGray),
-        )));
-        diff_lines.push(Line::from(Span::styled(
-            " }",
-            Style::default().fg(Color::DarkGray),
-        )));
-
-        let is_active = offset % 2 == 0;
-        let active_border = if is_active {
-            Color::Rgb(250, 189, 47)
-        } else {
-            Color::DarkGray
-        };
-        let border_type = if is_active {
-            BorderType::Thick
-        } else {
-            BorderType::Plain
-        };
-
-        let editor_title = format!(" 📝 src/ui/ide.rs [LSP: Active {spinner}] ");
-
-        let editor_block = Block::default()
-            .title(Span::styled(
-                editor_title,
-                Style::default().fg(Color::Rgb(250, 189, 47)),
-            ))
-            .borders(Borders::ALL)
-            .border_type(border_type)
-            .border_style(Style::default().fg(active_border))
-            .padding(Padding::new(1, 1, 1, 1));
-
-        frame.render_widget(Paragraph::new(diff_lines).block(editor_block), chunks[1]);
-        crate::ui::borders::render_gradient_border(frame.buffer_mut(), chunks[1], animation_frame, is_active, is_running);
+        ide_state.editor.render(
+            frame,
+            chunks[1],
+            !ide_state.focus_tree,
+            animation_frame,
+            is_running,
+        );
 
         // 3. Chat
         let chat_block = Block::default()
             .title(Span::styled(
                 " CHAT ",
-                Style::default().fg(Color::Rgb(211, 134, 155)).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Rgb(211, 134, 155))
+                    .add_modifier(Modifier::BOLD),
             ))
             .borders(Borders::ALL)
             .border_type(BorderType::Plain)
@@ -172,10 +83,24 @@ impl IdeView {
 
         let chat_inner = chat_block.inner(chunks[2]);
         frame.render_widget(chat_block, chunks[2]);
-        crate::ui::borders::render_gradient_border(frame.buffer_mut(), chunks[2], animation_frame, false, is_running);
+        crate::ui::borders::render_gradient_border(
+            frame.buffer_mut(),
+            chunks[2],
+            animation_frame,
+            false,
+            is_running,
+        );
 
         chat_state.visible_height = chat_inner.height.saturating_sub(2);
         chat_component.set_show_logo_on_empty(false);
-        chat_component.render(frame, chat_inner, chat_state, card_manager, subagent_list, connected, animation_frame);
+        chat_component.render(
+            frame,
+            chat_inner,
+            chat_state,
+            card_manager,
+            subagent_list,
+            connected,
+            animation_frame,
+        );
     }
 }

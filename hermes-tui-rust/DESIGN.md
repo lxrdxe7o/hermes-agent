@@ -1,120 +1,128 @@
 # Hermes TUI: Visual Design & Aesthetics Architecture
 
-This document outlines the visual design language, layout strategies, animation paradigms, and aesthetic constraints for the Hermes TUI. It synthesizes the cutting-edge terminal UX capabilities showcased in the [Ratatui Ecosystem](https://ratatui.rs/) (e.g., *Slumber*, *Yazi*, *CodeWhale*) with the strict performance and stability boundaries defined by our [Architectural Critique](https://gemini.google.com/share/856119b3ad9c).
+This document records the visual language and layout decisions for the current Rust TUI implementation. It is no longer a speculative plan: the app already has a working multi-view workspace, animated borders, dashboard telemetry, a local IDE pane, a subagent sidebar, and protocol-linked effects.
 
-Our goal is to deliver a zero-latency, visually striking, and completely memory-safe terminal application.
+## 1. Layout & Composition
 
----
+The current Rust TUI is a full-screen Ratatui application with a top-level view router.
 
-## 1. Layout & Composition (The Cassowary Grid)
+### Active views
 
-Ratatui uses a Constraint-based Layout System powered by the Cassowary solver. Hermes will leverage this to create a responsive, IDE-like workspace rather than a flat, scrolling terminal log.
+- **Dashboard**: branded landing page with animated GIF, CPU/memory gauges, CPU/memory sparklines, placeholder network/token-speed indicators, tools/MCP/skills panels, and activity lists.
+- **IDE**: three-column workspace with a local file tree, `tui-textarea` editor pane, and chat pane.
+- **Kanban**: mock task board with Backlog, Executing, and Verified columns. It is visual only and not connected to durable task state.
+- **Chat**: primary conversation interface with streaming messages, tool cards, hashlines, subagent sidebar, composer, toolbar, and prompt overlays.
 
-### 1.1. Adaptive Grid & Flexbox Paradigms
-*   **Nested Layouts:** The core UI uses a root App container that splits vertically (Toolbar, Main Body, Status) and horizontally (Left Sidebar, Chat, Right Sidebar).
-*   **Flex Alignment:** Utilize Ratatui's `Flex` features (`SpaceBetween`, `SpaceAround`, `Center`) to align widgets dynamically. Modal windows (e.g., login, configuration) will use `Flex::Center` to remain perfectly centered regardless of the terminal dimensions.
-*   **Responsive Collapsing:** Use `Constraint::Min` and `Constraint::Max` to define boundaries. If the terminal width drops below 100 columns, sidebars will collapse into a vertical "Kanban" stack or hide entirely behind a Tab navigation system.
-*   **Breathability:** Enforce `.spacing(1)` or `.spacing(2)` on layouts to add critical visual gaps between Panes, preventing the UI from feeling claustrophobic.
+### Layout rules
 
-### 1.2. Floating Overlays & Modals
-*   **Layered Modals:** Complex, focused interactions (like File Picking, Model Selection, or Settings) will utilize the `Clear` widget.
-*   *Implementation:* Calculate a centered `Constraint::Percentage` `Rect`, render `Clear` to erase the background, and draw a `Block` with `BorderType::Thick` and an active shadow effect.
+- Use `.spacing(1)` or `.spacing(2)` between major panes so the interface does not feel cramped.
+- Active panes use thicker/brighter borders; inactive panes recede with dark gray borders.
+- The IDE view currently uses a fixed three-column split: file tree (`Length(30)`), editor (`Percentage(40)`), chat (`Min(40)`).
+- The Chat view owns the richest state: transcript, tool cards, hashline viewer, subagent list, composer, prompts, model/session pickers, and completion popups.
 
----
+## 2. Color & Theme
 
-## 2. Advanced Widget Repertoire
+The Rust TUI defaults to a Gruvbox dark palette. Current code uses explicit RGB values in Ratatui components rather than a centralized theme token system.
 
-To achieve a "Dashboard" aesthetic, Hermes will utilize Ratatui's high-fidelity widgets to represent data and state visually, minimizing text parsing for the user.
+Common colors:
 
-### 2.1. Telemetry & Analytics
-*   **Canvas Widget:** Use for "drawing" high-resolution, Braille-character (8 dots per cell) charts. Ideal for visualizing real-time metrics like agent "thought space" embeddings or complex network topologies.
-*   **Sparklines:** Deploy compact, in-line trend lines (using `Sparkline`) within table cells or small corner blocks to visualize historical data, such as CPU/Memory usage over the last 60 seconds, without sacrificing real estate.
-*   **Gauges & LineGauges:** Use solid block characters (`█`, `▓`, `▒`, `░`).
-    *   `Gauge` for large, prominent tasks (e.g., pulling a massive LLM model).
-    *   `LineGauge` for subtle, single-line progress indicators nested in the bottom Status bar.
+- Gruvbox yellow: `Rgb(250, 189, 47)` for active focus, warnings, and primary accents.
+- Gruvbox green: `Rgb(131, 165, 152)` for gauges and success-like telemetry.
+- Gruvbox pink/purple: `Rgb(211, 134, 155)` for secondary accents and reasoning/tool emphasis.
+- Gruvbox dark gray: `Rgb(40, 40, 40)` for backgrounds and inactive borders.
 
-### 2.2. Stateful Navigation & Data Grids
-*   **Stateful Tables & Lists:** Utilize `TableState` and `ListState` to manage scrolling through agent logs, file trees, or configuration properties.
-*   **Visual Selection:** Highlight selected rows with an inversion of background color (e.g., `Color::Blue` bg, `Color::Black` fg) and prefix active elements with indicators like `>>` or a custom Nerd Font icon.
-*   **Tabs:** Positioned at the very top (Toolbar) to provide high-level context switching (e.g., Chat, Editor, Graph, Settings) with distinct active/inactive `Modifier::BOLD` / `Modifier::DIM` styling.
+This is acceptable for the experimental Rust branch, but future production hardening should centralize these values behind the same theme/skin system used by the Python TUI.
 
----
+## 3. Typography & Glyphs
 
-## 3. Typography & Glyph Design
+The UI intentionally uses terminal glyphs and emoji-style icons for fast recognition:
 
-*   **Nerd Fonts Integration:** Extensive use of icons for file types, agent statuses, and navigation. 
-*   **Inline Border Titles:** To maximize vertical space, place titles and labels directly within the top or bottom border of a `Block` (e.g., `Block::default().title(" Modal Editor ")`).
-*   **Sub-cell Resolution:** 
-    *   **Braille** (`⡀`, `⡄`, `⡆`, `⡇`, `⣇`, `⣧`, `⣷`, `⣿`) strictly for continuous curves, maps, and high-density line charts.
-    *   **Blocks** (` `, `▂`, `▃`, `▄`, `▅`, `▆`, `▇`, `█`) strictly for volume, bars, audio waveforms, and loading geometry.
+- `📁`, `🦀`, `⚙️`, `📝`, `📜`, `📄` for file tree item types.
+- `▂▃▄▅▆▇█` for wave footer and block charts.
+- `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` for lightweight spinners.
+- `▸` / `▾` are used conceptually for collapsible panels, though the current Rust UI renders most panels directly rather than with a persistent collapsible banner.
 
----
+The design assumes modern Unicode terminal support. If a terminal lacks emoji or wide glyphs, the UI may still render but visual density can shift.
 
-## 4. O(1) Theming & Color Science
+## 4. Motion Design
 
-*   **Pre-computed Palettes:** To satisfy the strict 8.33ms (120 FPS) render constraint, runtime theme calculation is forbidden. We utilize a thread-local `SCOPE_COLOR_CACHE` mapped to an 11-color static ANSI palette (e.g., Catppuccin Macchiato or Nord).
-*   **24-bit RGB & Gradients:** Where terminal support allows, utilize full RGB for soft gradient headers or telemetry heatmaps.
-*   **Semantic Modifiers:**
-    *   Heavy use of `Modifier::BOLD` for active focus areas.
-    *   Heavy use of `Modifier::DIM` to recede secondary information or inactive panes into the background.
-    *   *Alerts:* Alternating `Color::Red` and `Modifier::DIM` via a timer for pulsing/blinking critical alerts (e.g., bounded channel saturation).
+Motion is used for state feedback, not decoration.
 
----
+### Implemented motion
 
-## 5. Motion Design & Animations
+- **Animated borders**: gradient borders pulse when panes are active or the gateway is running.
+- **Wave footer**: sine-wave block characters visualize prompt/tool/reason/output/failure activity.
+- **Sixel GIF**: `bebop.gif` renders on the dashboard.
+- **View transitions**: switching between top-level views triggers a short effect sequence through `EffectManager`.
+- **Tool/stream effects**: streaming deltas and tool starts trigger `tachyonfx` effects.
+- **Demand-driven rendering**: the engine sleeps deeply when no animation is active.
 
-Animations in Hermes provide crucial state feedback (loading, streaming, erroring) without relying on text.
+### Effect manager
 
-### 5.1. Mathematical Visualizers (Inspired by *CodeWhale*)
-*   Instead of static loading spinners, background agent thought processes will be represented by **phase-shifted sine-waves** mapped to block characters.
-*   *Algorithm:* Render organic loaders using sinusoidal RGB lerping calculated backwards (`iter().rev()`) based on the active `Rect` width.
+`src/ui/effects.rs` wraps `tachyonfx::EffectManager` and exposes:
 
-### 5.2. Smooth Scrolling & State Changes
-*   Scrolling through `ropey` text buffers or stateful lists should adjust offset incrementally to provide a sense of continuous motion, rather than jumping paginations.
+- `trigger_stream_effect()`
+- `trigger_tool_effect()`
+- `trigger_view_transition()`
+- `trigger_grand_loader()`
+- `apply(frame.buffer_mut(), area, delta_ms)`
 
-### 5.3. Hardware-Accelerated Shaders (via *TachyonFX*)
-*   **Post-processing Effects:** Use `tachyonfx` for UI transitions.
-    *   *Slide In:* Chat bubbles appearing smoothly from the bottom.
-    *   *Fade:* Dimming the background IDE when a Modal Editor opens.
-    *   *Glitch:* A brief, stylized visual glitch when an AI agent encounters a severe hallucination or error.
-*   **Cell Safety Constraint:** TachyonFX filters must **never** be applied to `Rect` spaces currently rendering SIXEL graphics to prevent buffer corruption.
+The current implementation uses an unsafe transmute to bridge Ratatui 0.28 buffers into tachyonfx's Ratatui-core 0.1 buffer type. This works as a compatibility shim but should be treated as a production risk until versions are aligned or a safer bridge is introduced.
 
----
+## 5. Component Visual Roles
 
-## 6. The Performance Mandate: Beauty without Starvation
+### Dashboard
 
-The aesthetics detailed above *must* operate within the bounds of the architectural critique to prevent OOM errors, CPU starvation, and UI tearing.
+The dashboard is the branded landing and observability view. It combines:
 
-### 6.1. Demand-Driven Rendering
-We cannot poll animations at 120Hz indefinitely. The TUI employs a **Demand-Driven Render State**:
-*   An `AtomicUsize` tracks active animations (e.g., `ACTIVE_ANIMATIONS.fetch_add(1)`).
-*   If `ACTIVE_ANIMATIONS == 0`, the render loop suspends itself, dropping CPU usage to ~0%.
-*   Any incoming event over the bounded `mpsc` channel immediately wakes the renderer.
+- Hermes ASCII banner.
+- Sixel GIF.
+- CPU and memory gauges from `sysinfo`.
+- CPU/memory sparklines.
+- Placeholder network and token-speed indicators.
+- Tool/MCP/skills/sessions panels.
 
-### 6.2. Zero-Flicker Architecture
-To support complex shader transitions and layered modals without visual tearing (especially on GPU-accelerated emulators like Ghostty/Kitty/WezTerm):
-*   Every frame swap is strictly wrapped in **DEC 2026 Synchronized Output** sequences (`\x1b[?2026h` before draw, `\x1b[?2026l` after draw).
+### IDE
 
-### 6.3. Zero-Copy `WidgetRef`
-*   Dynamic visual states (like an animated loading bar within a chat bubble) must use `WidgetRef` and `StatefulWidget`.
-*   We absolutely forbid `&mut self` mutations in the `draw()` method to allow components to cache their layout computations.
+The IDE is a local developer workspace:
 
----
+- Left pane: file tree rooted at the current working directory.
+- Middle pane: editable file buffer.
+- Right pane: chat transcript and tool cards.
 
-## 7. Rich Media: Terminal as a Canvas
+It is not yet an LSP-backed IDE or a gateway file-edit surface.
 
-### 7.1. Sixel & Kitty Graphics
-*   Hermes will render AI-generated images natively into the TUI using the `icy_sixel` crate.
-*   **Scaling:** Images will be processed asynchronously on a background worker thread using `imageops::FilterType::Lanczos3` to scale them cleanly into terminal cell coordinates before passing them to the UI thread.
+### Chat
 
-### 7.2. Embedded Modal Editor
-*   For deep code editing or prompt crafting, a `ropey`-backed modal editor floats over the UI.
-*   It features strict Vim-like Normal and Insert modes.
-*   **Cursor Mapping:** Uses the `unicode-width` crate to mathematically align the logical `ropey` coordinates with the physical hardware cursor, ensuring seamless integration of the terminal's native text selection capabilities.
+The chat pane is the primary agent surface. It renders:
 
----
+- User/assistant/system messages.
+- Streaming assistant deltas.
+- Tool cards with running/completed/failed states.
+- Hashline diffs.
+- Subagent sidebar with status icons.
+- Composer, completion popups, and prompt overlays.
 
-## 8. Summary of Fallbacks & Graceful Degradation
+### Kanban
 
-1.  **Strict Backpressure:** If the LLM streams tokens faster than the terminal can render them, the bounded `mpsc` channel will exert backpressure, prioritizing the UI thread's responsiveness over the text stream.
-2.  **Graceful Degradation:** All motion design and Sixel visuals are strictly feature-gated. If the user passes `--no-animation`, `--low-motion`, or if the terminal does not support SIXEL/DEC 2026, the UI falls back to an elegant, static layout using standard ASCII/ANSI primitives (e.g., replacing Braille charts with simple text percentages).
+The Kanban view is a mock board. It should not be documented as connected task management until it reads Hermes' durable Kanban API.
+
+## 6. Performance Constraints
+
+- Keep rendering read-only where possible.
+- Do not add unbounded queues for UI events.
+- Keep animations behind the engine animation counter so idle CPU stays low.
+- Avoid applying global effects over Sixel regions until flicker is resolved.
+- Do not increase dependency versions without checking whether the tachyonfx/Ratatui buffer bridge still compiles.
+
+## 7. Known Visual Debt
+
+- Hardcoded RGB colors should eventually move into the shared Hermes theme/skin system.
+- Sixel/GIF playback can flicker on high-latency terminal backends.
+- Kanban is mock data.
+- Network and token-speed dashboard metrics are placeholder/mock values.
+- The tachyonfx buffer transmute is a compatibility shim, not a long-term architecture.
+
+## 8. Fallback Behavior
+
+If effects are disabled or the terminal cannot safely render them, the UI should remain usable with static borders, text gauges, and normal Ratatui widgets. Motion must never block user input or gateway communication.

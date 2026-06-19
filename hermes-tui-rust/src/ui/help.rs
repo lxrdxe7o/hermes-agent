@@ -1,143 +1,162 @@
-//! Help overlay — TUI keybinding reference
+//! Help module - Global keybindings help overlay
 //!
-//! Renders a centered overlay showing all active keyboard shortcuts,
-//! matching the user's tmux configuration conventions.
+//! This module provides a modal overlay that displays all available
+//! keyboard shortcuts across the application.
 
 use ratatui::{
-    layout::{Alignment, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph, Row, Table},
     Frame,
 };
 
-/// Help overlay — stateless keybinding reference.
-pub struct HelpOverlay;
+pub struct HelpView;
 
-const DIM: Color = Color::Rgb(146, 131, 116);    // gruvbox gray
-const YELLOW: Color = Color::Rgb(250, 189, 47);   // gruvbox yellow
-const GREEN: Color = Color::Rgb(184, 187, 38);     // gruvbox green
-const LIGHT: Color = Color::Rgb(235, 219, 178);    // gruvbox light
-const BG: Color = Color::Rgb(40, 40, 40);           // gruvbox dark bg
-
-impl HelpOverlay {
-    /// Render the help overlay centered over `area`.
+impl HelpView {
     pub fn render(frame: &mut Frame, area: Rect) {
-        if area.width < 50 || area.height < 24 {
-            return;
-        }
+        let help_area = Self::centered_rect(70, 70, area);
 
-        let width = area.width.min(74);
-        let height = area.height.min(36);
-        let x = area.width.saturating_sub(width) / 2;
-        let y = area.height.saturating_sub(height) / 2;
-        let help_area = Rect::new(x, y, width, height);
-
-        // Clear background beneath the overlay
+        // Clear the background
         frame.render_widget(Clear, help_area);
 
         let block = Block::default()
-            .title(" ⌨️  Hermes TUI — Keybindings ")
+            .title(Span::styled(
+                " ⌨️  KEYBINDINGS HELP ",
+                Style::default()
+                    .fg(Color::Rgb(250, 189, 47))
+                    .add_modifier(Modifier::BOLD),
+            ))
             .borders(Borders::ALL)
             .border_type(BorderType::Thick)
-            .border_style(Style::default().fg(YELLOW))
-            .style(Style::default().bg(BG));
+            .border_style(Style::default().fg(Color::Rgb(250, 189, 47)))
+            .padding(Padding::new(2, 2, 1, 1));
 
         let inner = block.inner(help_area);
         frame.render_widget(block, help_area);
 
-        let mut lines: Vec<Line> = Vec::new();
-
-        fn key_desc(key: &'static str, desc: &'static str) -> Line<'static> {
-            Line::from(vec![
-                Span::styled(format!(" {:15}", key), Style::default().fg(GREEN)),
-                Span::styled(desc, Style::default().fg(LIGHT)),
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Header
+                Constraint::Min(1),    // Table
+                Constraint::Length(1), // Footer
             ])
-        }
+            .split(inner);
 
-        fn section(title: &str) -> Line<'static> {
-            Line::from(Span::styled(
-                format!(" {} ", title),
+        // Header
+        let header = Paragraph::new(vec![
+            Line::from(vec![Span::styled(
+                "Hermes TUI v0.1.0",
+                Style::default().fg(Color::DarkGray),
+            )]),
+            Line::from(vec![
+                Span::styled("Press ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    "ESC",
+                    Style::default()
+                        .fg(Color::Rgb(250, 189, 47))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" or ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    "?",
+                    Style::default()
+                        .fg(Color::Rgb(250, 189, 47))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" to close this help.", Style::default().fg(Color::Gray)),
+            ]),
+        ])
+        .alignment(Alignment::Center);
+        frame.render_widget(header, chunks[0]);
+
+        // Keybindings Table
+        let rows = vec![
+            Row::new(vec!["Global", "", ""]),
+            Row::new(vec![
+                "  Alt+A",
+                "Prefix Mode",
+                "Enter tmux-style command mode",
+            ]),
+            Row::new(vec!["  ?", "Help", "Toggle this help overlay"]),
+            Row::new(vec!["  Ctrl+C", "Quit", "Exit the application"]),
+            Row::new(vec!["", "", ""]),
+            Row::new(vec!["Views", "", ""]),
+            Row::new(vec!["  1", "Dashboard", "System metrics and tools"]),
+            Row::new(vec!["  2", "IDE", "File explorer and editor"]),
+            Row::new(vec!["  3", "Kanban", "Task orchestration board"]),
+            Row::new(vec!["  4", "Chat", "Main conversation interface"]),
+            Row::new(vec!["", "", ""]),
+            Row::new(vec!["Chat & Composer", "", ""]),
+            Row::new(vec!["  i", "Insert Mode", "Focus input field"]),
+            Row::new(vec!["  Esc", "Normal Mode", "Focus chat history"]),
+            Row::new(vec!["  Enter", "Submit", "Send message or execute tool"]),
+            Row::new(vec!["  Tab", "Next Pane", "Cycle focus between panes"]),
+            Row::new(vec!["  /", "Command", "Enter slash command mode"]),
+            Row::new(vec!["", "", ""]),
+            Row::new(vec!["IDE View", "", ""]),
+            Row::new(vec![
+                "  Tab",
+                "Switch Focus",
+                "Toggle between Tree and Editor",
+            ]),
+            Row::new(vec![
+                "  Enter",
+                "Open File",
+                "Load selected file into editor",
+            ]),
+            Row::new(vec!["  j/k", "Navigation", "Move cursor up/down"]),
+        ];
+
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(15),
+                Constraint::Length(20),
+                Constraint::Min(10),
+            ],
+        )
+        .header(
+            Row::new(vec!["KEY", "ACTION", "DESCRIPTION"]).style(
                 Style::default()
-                    .fg(YELLOW)
+                    .fg(Color::DarkGray)
                     .add_modifier(Modifier::BOLD),
-            ))
-        }
+            ),
+        )
+        .column_spacing(2)
+        .highlight_style(Style::default().fg(Color::Rgb(250, 189, 47)));
 
-        // ── Prefix Key ──
-        lines.push(section("Prefix Key  (tmux-style)"));
+        frame.render_widget(table, chunks[1]);
 
-        let prefix_line = Line::from(vec![
-            Span::styled("  Alt+A  ", Style::default().fg(GREEN).add_modifier(Modifier::BOLD)),
-            Span::styled("then command key  —  ", Style::default().fg(DIM)),
-            Span::styled("Esc", Style::default().fg(GREEN)),
-            Span::styled(" cancels prefix", Style::default().fg(DIM)),
-        ]);
-        lines.push(prefix_line);
-        lines.push(Line::from(""));
-        lines.push(key_desc("Alt+A then ?", "Toggle this help screen"));
-        lines.push(key_desc("Esc (from help)", "Close help"));
-        lines.push(Line::from(""));
+        // Footer
+        let footer = Paragraph::new(Span::styled(
+            "Inspired by oh-my-pi • Built with Ratatui",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        ))
+        .alignment(Alignment::Center);
+        frame.render_widget(footer, chunks[2]);
+    }
 
-        // ── Pane Navigation ──
-        lines.push(section("Pane Navigation"));
+    fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+        let popup_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage((100 - percent_y) / 2),
+                Constraint::Percentage(percent_y),
+                Constraint::Percentage((100 - percent_y) / 2),
+            ])
+            .split(r);
 
-        let nav_prefix = Line::from(vec![
-            Span::styled("  (prefix) ", Style::default().fg(DIM)),
-            Span::styled("h/j/k/l", Style::default().fg(GREEN)),
-            Span::styled("  —  Focus panes", Style::default().fg(LIGHT)),
-        ]);
-        lines.push(nav_prefix);
-        lines.push(key_desc("Alt+←/→/↑/↓", "Resize pane 5 cells"));
-        lines.push(Line::from(""));
-
-        // ── Session Management ──
-        lines.push(section("Session Management"));
-        lines.push(key_desc("Ctrl+n", "New session"));
-        lines.push(key_desc("Ctrl+r", "Resume last session"));
-        lines.push(key_desc("Ctrl+l", "List sessions"));
-        lines.push(key_desc("Ctrl+k", "Kill current session"));
-        lines.push(key_desc("Ctrl+d", "Detach / close session"));
-        lines.push(key_desc("Ctrl+a", "Switch to session…"));
-        lines.push(key_desc("(prefix) R", "Rename session"));
-        lines.push(key_desc("(prefix) r", "Reload config"));
-        lines.push(Line::from(""));
-
-        // ── View / Window Management (prefix) ──
-        lines.push(section("View / Window Management  (prefix)"));
-        lines.push(key_desc("(prefix) 1…4", "Switch views  (1=Dashboard, 4=Chat)"));
-        lines.push(key_desc("(prefix) c", "New view"));
-        lines.push(key_desc("(prefix) ,", "Rename view"));
-        lines.push(key_desc("(prefix) \"", "New view (split)"));
-        lines.push(key_desc("(prefix) x", "Close pane"));
-        lines.push(key_desc("(prefix) &", "Kill view"));
-        lines.push(Line::from(""));
-
-        // ── Input Modes ──
-        lines.push(section("Input Modes"));
-        lines.push(key_desc("i", "Insert mode  (from Normal)"));
-        lines.push(key_desc("Esc", "Normal mode  (from Insert / Cmd)"));
-        lines.push(key_desc("/", "Command mode  (from Normal)"));
-        lines.push(key_desc("Enter", "Submit prompt"));
-        lines.push(Line::from(""));
-
-        // ── Other ──
-        lines.push(section("Other"));
-        lines.push(key_desc("Ctrl+m", "Model picker"));
-        lines.push(key_desc("Ctrl+c / q", "Quit"));
-
-        // Footer hint
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            " Press Alt+A ? or Esc to close ",
-            Style::default().fg(DIM).add_modifier(Modifier::DIM),
-        )]));
-
-        let paragraph = Paragraph::new(lines)
-        .alignment(Alignment::Left)
-        .wrap(Wrap { trim: false })
-        .style(Style::default().bg(BG));
-
-        frame.render_widget(paragraph, inner);
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage((100 - percent_x) / 2),
+                Constraint::Percentage(percent_x),
+                Constraint::Percentage((100 - percent_x) / 2),
+            ])
+            .split(popup_layout[1])[1]
     }
 }

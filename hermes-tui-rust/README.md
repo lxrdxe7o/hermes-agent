@@ -1,214 +1,204 @@
 # Hermes TUI Rust
 
-A Rust-based Terminal User Interface for Hermes Agent, inspired by oh-my-pi's TUI.
+A native Rust terminal UI for Hermes Agent, built with Ratatui and Crossterm. It is an experimental TUI implementation that speaks the same JSON-RPC-over-stdio protocol as the existing Hermes TUI gateway.
 
 ## Status
 
-🚧 **Under Development** - This is a work in progress to port oh-my-pi's TUI features to Hermes Agent.
+🚧 **Under development** — the Rust TUI can be built and run from this directory, but it is not yet wired into the main `hermes` CLI entrypoint or the managed installer path.
 
 ## Overview
 
-This project provides a fast, native terminal experience for Hermes Agent users, with full compatibility to the existing JSON-RPC protocol used by the TypeScript TUI.
+The project provides a fast, native terminal surface for Hermes Agent sessions. It launches the Python TUI gateway as a child process, connects through stdio JSON-RPC, and renders the conversation and workspace state with Ratatui.
 
-## Features (Planned)
+Current focus areas:
 
-- [x] Core chat interface with streaming and Markdown support
-- [x] View system with multi-tab switching (Dashboard, IDE, Kanban, Chat)
-- [x] Animated Sixel GIF logo support (`bebop.gif`)
-- [x] Gruvbox theme (default) with high-contrast palette
-- [x] Integrated completion system (slash commands and file paths)
-- [x] Categorized model picker with provider-level grouping
-- [x] Enhanced prompt flows for approvals, clarify, and secrets
-- [x] Native mouse support (scrolling) and bracketed paste
-- [x] Improved tool card rendering with automatic text wrapping
+- Multi-view terminal workspace: Dashboard, IDE, Kanban, and Chat.
+- Live chat rendering with streaming messages, tool cards, approval/clarify/secret prompts, and subagent activity.
+- Local IDE workspace: a file tree rooted at the current directory and an editor pane that loads selected files.
+- Dashboard telemetry: real CPU and memory samples from `sysinfo`, plus placeholder network and token-speed sparklines.
+- Visual polish: animated borders, Sixel GIF rendering, view-switch transitions, wave footer, and `tachyonfx` post-processing effects.
+- Demand-driven rendering: the event loop sleeps deeply when no animation or user/gateway event needs attention.
+
+## Implemented Features
+
+- [x] Core chat interface with streaming and Markdown support.
+- [x] Multi-view switching between Dashboard, IDE, Kanban, and Chat.
+- [x] Animated Sixel GIF logo support using `bebop.gif`.
+- [x] Gruvbox theme default with high-contrast 24-bit colors.
+- [x] Slash-command and path completion popups.
+- [x] Model picker, session picker, approval prompts, clarification prompts, and secret prompts.
+- [x] Mouse support, scrolling, and bracketed paste.
+- [x] Tool cards with asynchronous status/result rendering.
+- [x] Hashline viewer for file-diff style output.
+- [x] Subagent sidebar tracking for start/tool/complete events.
+- [x] Local file tree and editor pane in the IDE view.
+- [x] CPU and memory telemetry from `sysinfo`.
+- [x] View transition animations and global effect manager.
+- [x] Help overlay with global, view, chat, and IDE keybindings.
+
+## Current Limitations
+
+- The Kanban view is still a mock board; it is not connected to Hermes' durable Kanban API.
+- The IDE file tree reads the local filesystem only. It does not yet apply gateway file edits or LSP-backed changes.
+- Network throughput and token-speed dashboard sparklines are placeholder/mock values.
+- The Rust TUI is not yet exposed through `hermes --tui-rust`, `display.interface: rust`, or the managed installer.
+- Full end-to-end validation against a live Hermes production gateway is still pending.
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
-│                    HERMES CORE (Python)                       │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │                 tui_gateway/server.py                        ││
-│  │  JSON-RPC Server - Sessions, Agents, Tool Execution         ││
-│  └─────────────────────────────────────────────────────────┘│
+│ Hermes Core (Python)                                        │
+│  tui_gateway.entry / tui_gateway.server                     │
+│  JSON-RPC sessions, agents, tools, approvals, completions    │
 └─────────────────────────────────────────────────────────────┘
-                              │ JSON-RPC over stdio
-                              ▼
+                          │ stdio JSON-RPC
+                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  hermes-tui-rust (Rust/ratatui)                              │
-│  - Protocol layer (serde_json, tokio)                         │
-│  - UI layer (ratatui, crossterm)                              │
-│  - State management                                           │
-│  - Event handling                                            │
+│ hermes-tui-rust (Rust / Ratatui / Crossterm)                │
+│  App event loop, ViewState router, GatewayClient            │
+│  Chat, Dashboard, IDE, Kanban, prompts, effects             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Protocol
+The Rust side is intentionally standalone for now:
 
-Uses the exact same JSON-RPC protocol as the existing TypeScript TUI. See:
-- `tui_gateway/server.py` - Server implementation
-- `ui-tui/src/gatewayTypes.ts` - TypeScript type definitions
-
-The Rust implementation mirrors these types in `src/protocol/types.rs`.
-
-## Usage
-
-### As standalone binary
-
-```bash
-# Build
-cargo build --release
-
-# Run (connects to hermes gateway via stdio)
-./target/release/hermes-tui-rust
-```
-
-### Via Hermes installer
-
-```bash
-# The Rust TUI will be automatically installed and updated
-# via the Hermes installer (hermes update)
-hermes update
-hermes --tui-rust
-```
-
-### Configuration
-
-```yaml
-# In ~/.hermes/config.yaml
-display:
-  interface: rust  # Use Rust TUI
-```
-
-Or via environment variable:
-```bash
-export HERMES_TUI_RUST=1
-hermes
-```
-
-## Development
-
-### Prerequisites
-
-- Rust 1.75+
-- Cargo
-- Python 3.11+ (for Hermes gateway)
-
-### Setup
-
-```bash
-cd hermes-tui-rust
-cargo build
-```
-
-### Running
-
-The Rust TUI communicates with the Hermes gateway via JSON-RPC over stdio. To test:
-
-```bash
-# In one terminal: Start the gateway
-python -m tui_gateway.entry
-
-# In another terminal: Run the TUI (connected via stdio pipe)
-# Note: Actual integration will be handled by hermes_cli/main.py
-```
-
-### Testing
-
-```bash
-# Run all tests
-cargo test
-
-# Run specific test
-cargo test test_function_name
-
-# Run with logging
-RUST_LOG=debug cargo test
-```
+- `src/app.rs` owns the main event loop, view state, gateway lifecycle, rendering, and input routing.
+- `src/protocol/*` serializes gateway messages and transports JSON-RPC over stdio.
+- `src/ui/*` contains Ratatui components for every visible pane.
+- `src/state/*` stores local TUI state such as themes, input mode, focus panes, sessions, and message history.
+- `src/engine.rs` gates demand-driven animation ticks and wraps frame draws with DEC 2026 synchronized output.
 
 ## Project Structure
 
-```
+```text
 hermes-tui-rust/
-├── Cargo.toml                 # Dependencies and build configuration
-├── README.md                  # This file
-├── build.rs                   # Build script (version info)
+├── Cargo.toml
+├── README.md
+├── ARCHITECTURE.md
+├── DESIGN.md
+├── MODERN_TUI_ANIMATIONS.md
+├── PROJECT_DOCUMENTATION.md
+├── AGENTS.md
+├── build.rs
 ├── src/
-│   ├── main.rs               # Entry point
-│   ├── app.rs                # Main App struct and event loop
-│   ├── ui/                   # UI components
-│   │   ├── mod.rs            # UI module exports
-│   │   ├── chat.rs           # Chat transcript rendering
-│   │   ├── dashboard.rs      # Main dashboard with animated telemetry
-│   │   ├── ide.rs            # 3-column IDE layout prototype
-│   │   ├── kanban.rs         # Kanban board layout prototype
-│   │   ├── gif.rs            # Sixel-based animated GIF playback
-│   │   ├── composer.rs       # Input composer with history
-│   │   ├── toolbar.rs        # Status bar with animations
-│   │   ├── cards.rs          # Tool/message result cards
-│   │   └── prompts.rs        # Selectable choice overlays
-│   ├── protocol/             # JSON-RPC protocol
-│   │   ├── mod.rs            # Protocol module exports
-│   │   ├── types.rs          # Message types
-│   │   ├── client.rs         # JSON-RPC client
-│   │   └── transport.rs      # stdio transport
-│   ├── state/                # Application state
-│   │   ├── mod.rs            # State module exports
-│   │   ├── session.rs        # Session management
-│   │   ├── config.rs         # Config loading
-│   │   └── messages.rs       # Message history
-│   ├── handlers/             # Event handlers
-│   │   ├── mod.rs            # Handlers module exports
-│   │   ├── input.rs          # Input handling
-│   │   ├── keys.rs           # Keybindings
-│   │   └── mouse.rs          # Mouse events
-│   └── utils/               # Utilities
-│       ├── mod.rs            # Utils module exports
-│       ├── text.rs           # Text wrapping/utilities
-│       └── ansi.rs           # ANSI code handling
-├── tests/
-│   ├── protocol/            # Protocol tests
-│   │   ├── test_types.rs     # Type serialization tests
-│   │   ├── test_client.rs    # Client tests
-│   │   └── test_transport.rs # Transport tests
-│   ├── ui/                  # UI tests
-│   │   ├── test_chat.rs      # Chat tests
-│   │   └── test_composer.rs # Composer tests
-│   ├── integration/         # Integration tests
-│   │   ├── test_session.rs   # Session tests
-│   │   └── test_tools.rs     # Tool tests
-│   └── mock/                # Mock gateway for testing
-│       ├── server.rs        # Mock server
-│       └── messages.rs      # Mock messages
-└── .gitignore
+│   ├── main.rs
+│   ├── app.rs
+│   ├── engine.rs
+│   ├── error.rs
+│   ├── protocol/
+│   │   ├── client.rs
+│   │   ├── transport.rs
+│   │   └── types.rs
+│   ├── state/
+│   │   ├── config.rs
+│   │   ├── messages.rs
+│   │   └── session.rs
+│   ├── ui/
+│   │   ├── banner.rs
+│   │   ├── borders.rs
+│   │   ├── cards.rs
+│   │   ├── chat.rs
+│   │   ├── completions.rs
+│   │   ├── composer.rs
+│   │   ├── dashboard.rs
+│   │   ├── editor.rs
+│   │   ├── effects.rs
+│   │   ├── file_tree.rs
+│   │   ├── gif.rs
+│   │   ├── hashline.rs
+│   │   ├── help.rs
+│   │   ├── ide.rs
+│   │   ├── kanban.rs
+│   │   ├── model_picker.rs
+│   │   ├── prompts.rs
+│   │   ├── session_picker.rs
+│   │   ├── subagent.rs
+│   │   ├── toolbar.rs
+│   │   └── wave.rs
+│   └── utils/
+│       ├── ansi.rs
+│       ├── clipboard.rs
+│       └── text.rs
+└── tests/
 ```
+
+## Running Locally
+
+Run from the Hermes repository root so the Rust app can find `tui_gateway/`:
+
+```bash
+cd hermes-tui-rust
+cargo run
+```
+
+For a release build:
+
+```bash
+cargo build --release
+./target/release/hermes-tui-rust
+```
+
+The app writes its own logs and gateway stderr to `hermes-tui.log` in the current directory.
+
+## Development
+
+### Build
+
+```bash
+cargo build
+```
+
+### Test
+
+```bash
+cargo test
+```
+
+### Format and lint
+
+```bash
+cargo fmt
+cargo clippy -- -W clippy::all
+```
+
+### Documentation
+
+```bash
+cargo doc --open
+```
+
+## Keybindings
+
+| View | Key | Action |
+| ---- | --- | ------ |
+| Global | `Alt+A` | Enter tmux-style prefix mode |
+| Global | `?` | Toggle help overlay |
+| Global | `Ctrl+C` | Quit |
+| Views | `1` / `2` / `3` / `4` | Dashboard / IDE / Kanban / Chat |
+| Chat | `i` | Insert mode |
+| Chat | `Esc` | Normal mode |
+| Chat | `Tab` | Next pane |
+| IDE | `Tab` | Toggle focus between file tree and editor |
+| IDE | `Enter` | Open selected file in the editor |
+| IDE | `j/k` or `↓/↑` | Move in the focused tree/editor pane |
 
 ## Quality Gates
 
-All code must pass through these gates before being merged:
+Before merging changes:
 
-1. **Compilation**: Code must compile without warnings
-2. **Tests**: All tests must pass
-3. **Clippy**: `cargo clippy` must pass
-4. **Format**: `cargo fmt` must be clean
-5. **Review**: Code review by at least one other developer
-6. **Protocol Compatibility**: Must not break existing JSON-RPC protocol
-7. **Fallback**: TypeScript TUI must still work as fallback
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes following [Conventional Commits](https://www.conventionalcommits.org/)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+1. `cargo fmt` is clean.
+2. `cargo clippy -- -W clippy::all` passes.
+3. `cargo test` passes.
+4. Docs accurately describe the current implementation.
+5. No new unresolved borrow-checker workaround is introduced without a comment explaining why it is needed.
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License. See the repository `LICENSE` file.
 
 ## Acknowledgments
 
-- Inspired by [oh-my-pi](https://github.com/can1357/oh-my-pi) TUI
-- Built with [ratatui](https://github.com/ratatui-org/ratatui) and [crossterm](https://github.com/crossterm-rs/crossterm)
-- Part of [Hermes Agent](https://github.com/NousResearch/hermes-agent)
+- Inspired by the oh-my-pi terminal UI.
+- Built with [ratatui](https://github.com/ratatui-org/ratatui), [crossterm](https://github.com/crossterm-rs/crossterm), `tui-textarea`, `sysinfo`, and `tachyonfx`.
+- Part of [Hermes Agent](https://github.com/NousResearch/hermes-agent).

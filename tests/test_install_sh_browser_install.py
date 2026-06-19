@@ -31,12 +31,12 @@ def test_playwright_installs_are_timeout_guarded() -> None:
     text = INSTALL_SH.read_text()
 
     assert "run_browser_install_with_timeout()" in text
-    assert "run_browser_install_with_timeout 600 npx playwright install chromium" in text
+    assert "run_browser_install_with_timeout 600 venv/bin/playwright install chromium" in text
     # --with-deps is still invoked on apt-based systems, but only when sudo
     # is available non-interactively (root or passwordless sudo). Non-sudo
     # service users fall back to the browser-only install — see
     # install_node_deps() in install.sh.
-    assert "run_browser_install_with_timeout 600 npx playwright install --with-deps chromium" in text
+    assert "run_browser_install_with_timeout 600 venv/bin/playwright install --with-deps chromium" in text
 
 
 def test_install_script_supports_skip_browser_flag() -> None:
@@ -57,4 +57,4 @@ def test_install_script_skips_with_deps_when_no_sudo() -> None:
     # (root or non-interactive sudo), otherwise the installer hangs for
     # service-user installs (systemd accounts, operator users, etc.).
     assert 'if [ "$(id -u)" -eq 0 ] || (command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null); then' in text
-    assert "sudo npx playwright install-deps chromium" in text
+    assert "sudo venv/bin/playwright install-deps chromium" in text
